@@ -1,6 +1,5 @@
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Different rules that filter out the URLs that would be crawled for a lens
 #[derive(Clone, Debug, Deserialize, Serialize)]

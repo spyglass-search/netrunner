@@ -1,8 +1,11 @@
+use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use tokio::runtime;
 
 mod lib;
 use lib::config::LensConfig;
+use lib::crawl;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -18,14 +21,20 @@ enum Commands {
     Crawl,
 }
 
-fn main() {
+fn main() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
+    let runtime = runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("netrunner-worker")
+        .build()?;
 
     match &cli.command {
-        Commands::Crawl => {
-            if let Ok(lens) = LensConfig::from_path(cli.lens_file) {
-                println!("{:?}", lens);
+        Commands::Crawl => match LensConfig::from_path(cli.lens_file.clone()) {
+            Ok(lens) => runtime.block_on(crawl(lens)),
+            Err(e) => {
+                println!("Unable to read lens @ \"{}\"", cli.lens_file.display());
+                Err(anyhow!(e.to_string()))
             }
-        }
+        },
     }
 }
