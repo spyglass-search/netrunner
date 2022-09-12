@@ -140,7 +140,7 @@ pub async fn crawl(lens: LensConfig) -> Result<()> {
 
         if let Ok((robots_uri, robot)) = read_robots(url).await {
             if let Some(robot) = &robot {
-                let urls = read_sitemaps(&robot.sitemaps).await;
+                let urls = read_sitemaps(robot, &robot.sitemaps).await;
                 println!("number of urls: {}", urls.len());
             }
             robots_cache.insert(robots_uri, robot);

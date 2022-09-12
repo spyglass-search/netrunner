@@ -2,9 +2,9 @@ use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tokio::runtime;
+use spyglass_lens::LensConfig;
 
 mod lib;
-use lib::config::LensConfig;
 use lib::crawl;
 
 #[derive(Parser)]
