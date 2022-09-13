@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::{collections::HashSet, io::Read};
 
 use anyhow::Result;
@@ -31,7 +32,8 @@ async fn fetch_sitemap(
     client: &Client,
     robot: &Robot,
     sitemap_url: &str,
-    filters: &RegexSet,
+    allowed: &RegexSet,
+    skipped: &RegexSet,
 ) -> Vec<String> {
     println!("fetching sitemap: {}", sitemap_url);
     let mut urls = Vec::new();
@@ -60,7 +62,7 @@ async fn fetch_sitemap(
                         SiteMapEntity::Url(url_entry) => {
                             if let Some(loc) = url_entry.loc.get_url() {
                                 let url = loc.to_string();
-                                if robot.allowed(&url) && filters.is_match(&url) {
+                                if robot.allowed(&url) && allowed.is_match(&url) && !skipped.is_match(&url) {
                                     urls.push(url);
                                 }
                             }
@@ -68,7 +70,7 @@ async fn fetch_sitemap(
                         SiteMapEntity::SiteMap(sitemap_entry) => {
                             if let Some(loc) = sitemap_entry.loc.get_url() {
                                 urls.extend(
-                                    fetch_sitemap(client, robot, loc.as_str(), filters).await,
+                                    fetch_sitemap(client, robot, loc.as_str(), allowed, skipped).await,
                                 );
                             }
                         }
@@ -79,15 +81,20 @@ async fn fetch_sitemap(
         }
     }
 
+    println!("found {} urls for {}", urls.len(), sitemap_url);
     urls
 }
 
-async fn read_sitemaps(robot: &Robot, sitemaps: &Vec<String>, filters: &RegexSet) -> Vec<String> {
-    let client = http_client();
+async fn read_sitemaps(
+    client: &Client,
+    robot: &Robot,
+    sitemaps: &Vec<String>,
+    allowed: &RegexSet,
+    skipped: &RegexSet,
+) -> Vec<String> {
     let mut urls = Vec::new();
-
     for sitemap in sitemaps {
-        urls.extend(fetch_sitemap(&client, robot, sitemap, filters).await);
+        urls.extend(fetch_sitemap(client, robot, sitemap, allowed, skipped).await);
     }
 
     urls
@@ -107,8 +114,12 @@ pub async fn crawl(lens: LensConfig) -> Result<()> {
     // First, build filters based on the lens. This will be used to filter out
     // urls from sitemaps / cdx indexes
     // ------------------------------------------------------------------------
-    let filters = RegexSetBuilder::new(lens.into_regexes())
-        .size_limit(10_000_000)
+    let filters = lens.into_regexes();
+    let allowed = RegexSetBuilder::new(filters.allowed)
+        .size_limit(100_000_000)
+        .build()?;
+    let skipped = RegexSetBuilder::new(filters.skipped)
+        .size_limit(100_000_000)
         .build()?;
 
     // ------------------------------------------------------------------------
@@ -141,15 +152,29 @@ pub async fn crawl(lens: LensConfig) -> Result<()> {
     // Crawl sitemaps
     for robot in robots.cache.values().flatten() {
         if !robot.sitemaps.is_empty() {
-            to_crawl.extend(read_sitemaps(robot, &robot.sitemaps, &filters).await);
+            to_crawl.extend(read_sitemaps(&client, robot, &robot.sitemaps, &allowed, &skipped).await);
         }
     }
 
     // Process any URLs in the cdx queue
     for prefix in cdx_queue {
-        loop {
-            let _ = cdx::fetch_cdx(&client, &prefix, 1000, None).await;
+        let mut resume_key = None;
+        println!("fetching cdx for: {}", prefix);
+        while let Ok((urls, resume)) =
+            cdx::fetch_cdx(&client, &prefix, 1000, resume_key.clone()).await
+        {
+            to_crawl.extend(urls);
+            if resume.is_none() {
+                break;
+            }
+
+            resume_key = resume;
         }
+    }
+
+    let mut file = std::fs::File::create("urls.txt").expect("create failed");
+    for url in to_crawl {
+        let _ = file.write(format!("{}\n", url).as_bytes());
     }
 
     Ok(())
