@@ -9,21 +9,35 @@ pub struct Robots {
     pub cache: HashMap<String, Option<Robot>>,
 }
 
+type HasSitemap = bool;
+
 impl Robots {
     pub fn new() -> Self {
         Default::default()
     }
 
-    pub async fn process_url(&mut self, url: &str) {
+    pub async fn process_url(&mut self, url: &str) -> HasSitemap {
         if let Ok(robots_txt_url) = get_robots_url(url) {
             if self.cache.contains_key(&robots_txt_url) {
-                return;
+                let res = self.cache.get(&robots_txt_url).expect("check");
+                return match res {
+                    Some(robot) => !robot.sitemaps.is_empty(),
+                    None => false,
+                };
             }
 
             if let Ok(robot) = read_robots(&robots_txt_url).await {
+                let has_sitemap = match &robot {
+                    Some(robot) => !robot.sitemaps.is_empty(),
+                    None => false,
+                };
+
                 self.cache.insert(robots_txt_url, robot);
+                return has_sitemap;
             }
         }
+
+        false
     }
 }
 

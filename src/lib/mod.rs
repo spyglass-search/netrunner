@@ -58,12 +58,12 @@ async fn fetch_sitemap(
                 for entity in parser {
                     match entity {
                         SiteMapEntity::Url(url_entry) => {
-                            url_entry.loc.get_url().map(|loc| {
+                            if let Some(loc) = url_entry.loc.get_url() {
                                 let url = loc.to_string();
-                                if robot.allowed(&url) {
+                                if robot.allowed(&url) && filters.is_match(&url) {
                                     urls.push(url);
                                 }
-                            });
+                            }
                         }
                         SiteMapEntity::SiteMap(sitemap_entry) => {
                             if let Some(loc) = sitemap_entry.loc.get_url() {
@@ -95,17 +95,30 @@ async fn read_sitemaps(robot: &Robot, sitemaps: &Vec<String>, filters: &RegexSet
 
 /// Kick off a crawl for URLs represented by <lens>.
 pub async fn crawl(lens: LensConfig) -> Result<()> {
+    let client = http_client();
+
     let mut robots = Robots::new();
+    // Urls that need to be processed through a cdx index.
+    let mut cdx_queue: HashSet<String> = HashSet::new();
+    // Urls gathered from sitemaps + cdx processing.
     let mut to_crawl: HashSet<String> = HashSet::new();
 
-    // First, build filters based on the lens
+    // ------------------------------------------------------------------------
+    // First, build filters based on the lens. This will be used to filter out
+    // urls from sitemaps / cdx indexes
+    // ------------------------------------------------------------------------
     let filters = RegexSetBuilder::new(lens.into_regexes())
         .size_limit(10_000_000)
         .build()?;
 
-    // Fetch/parse robots.txt
+    // ------------------------------------------------------------------------
+    // Second, we fetch robots & sitemaps from the domains/urls represented by the lens
+    // ------------------------------------------------------------------------
     for domain in lens.domains.iter() {
-        robots.process_url(&format!("http://{}", domain)).await;
+        let domain_url = format!("http://{}", domain);
+        if !robots.process_url(&domain_url).await {
+            cdx_queue.insert(domain_url);
+        }
     }
 
     for prefix in lens.urls.iter() {
@@ -116,22 +129,26 @@ pub async fn crawl(lens: LensConfig) -> Result<()> {
             prefix
         };
 
-        robots.process_url(url).await;
+        if !robots.process_url(url).await {
+            cdx_queue.insert(url.to_owned());
+        }
     }
 
+    // ------------------------------------------------------------------------
     // Third, either read the sitemaps or pull data from a CDX to determine which
     // urls to crawl.
-    for robot in robots.cache.values() {
-        let mut no_urls = true;
-        if let Some(robot) = robot {
-            if !robot.sitemaps.is_empty() {
-                no_urls = false;
-                to_crawl.extend(read_sitemaps(robot, &robot.sitemaps, &filters).await);
-            }
+    // ------------------------------------------------------------------------
+    // Crawl sitemaps
+    for robot in robots.cache.values().flatten() {
+        if !robot.sitemaps.is_empty() {
+            to_crawl.extend(read_sitemaps(robot, &robot.sitemaps, &filters).await);
         }
+    }
 
-        if no_urls {
-            // Check CDX server
+    // Process any URLs in the cdx queue
+    for prefix in cdx_queue {
+        loop {
+            let _ = cdx::fetch_cdx(&client, &prefix, 1000, None).await;
         }
     }
 
