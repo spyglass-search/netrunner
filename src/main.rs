@@ -1,8 +1,8 @@
 use anyhow::anyhow;
 use clap::{Parser, Subcommand};
+use spyglass_lens::LensConfig;
 use std::path::PathBuf;
 use tokio::runtime;
-use spyglass_lens::LensConfig;
 
 mod lib;
 use lib::crawl;
