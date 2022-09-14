@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use tokio::runtime;
 
 mod lib;
-use lib::crawl;
+use lib::Netrunner;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -30,7 +30,10 @@ fn main() -> Result<(), anyhow::Error> {
 
     match &cli.command {
         Commands::Crawl => match LensConfig::from_path(cli.lens_file.clone()) {
-            Ok(lens) => runtime.block_on(crawl(lens)),
+            Ok(lens) => {
+                let mut netrunner = Netrunner::new(lens);
+                runtime.block_on(netrunner.crawl())
+            }
             Err(e) => {
                 println!("Unable to read lens @ \"{}\"", cli.lens_file.display());
                 Err(anyhow!(e.to_string()))
