@@ -12,8 +12,11 @@ use sitemap::reader::{SiteMapEntity, SiteMapReader};
 use spyglass_lens::LensConfig;
 use texting_robots::Robot;
 
+mod archive;
 mod cdx;
 mod robots;
+
+use archive::Archiver;
 use robots::Robots;
 
 static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"));
@@ -27,12 +30,10 @@ fn http_client() -> Client {
         .expect("Unable to create HTTP client")
 }
 
-#[derive(Default)]
 struct NetrunnerState {
     has_urls: bool,
 }
 
-#[derive(Default)]
 pub struct Netrunner {
     client: Client,
     robots: Robots,
@@ -43,6 +44,7 @@ pub struct Netrunner {
     to_crawl: HashSet<String>,
     storage: PathBuf,
     state: NetrunnerState,
+    archiver: Archiver,
 }
 
 impl Netrunner {
@@ -52,22 +54,24 @@ impl Netrunner {
         let storage = Path::new(&lens.name).to_path_buf();
         if !storage.exists() {
             // No point in continuing if we're unable to create this directory
-            if let Err(e) = std::fs::create_dir_all(storage.clone()) {
-                panic!("Unable to create crawl folder: {}", e);
-            }
+            std::fs::create_dir_all(storage.clone()).expect("Unable to create crawl folder");
         }
 
         let state = NetrunnerState {
             has_urls: storage.join("urls.txt").exists(),
         };
 
+        let archiver = Archiver::new(&storage).expect("Unable to create archiver");
+
         Netrunner {
+            archiver,
             client,
             robots,
             lens,
             storage,
             state,
-            ..Default::default()
+            cdx_queue: Default::default(),
+            to_crawl: Default::default(),
         }
     }
 
@@ -88,6 +92,7 @@ impl Netrunner {
         // ------------------------------------------------------------------------
         // Second, we fetch robots & sitemaps from the domains/urls represented by the lens
         // ------------------------------------------------------------------------
+        println!("-> Fetching robots.txt & sitemaps.xml");
         for domain in self.lens.domains.iter() {
             let domain_url = format!("http://{}", domain);
             if !self.robots.process_url(&domain_url).await {
@@ -115,8 +120,31 @@ impl Netrunner {
         // ------------------------------------------------------------------------
         if !self.state.has_urls {
             self.fetch_urls(&allowed, &skipped).await;
+        } else {
+            println!("-> Already collected URLs, skipping");
+            // Load urls from file
+            let file = std::fs::read_to_string(self.storage.join("urls.txt"))?;
+            self.to_crawl
+                .extend(file.lines().map(|x| x.to_string()).collect::<Vec<String>>());
         }
 
+        // CRAWL BABY CRAWL
+        let mut to_crawl: Vec<String> = self.to_crawl.clone().into_iter().collect();
+        to_crawl.sort();
+        for url in to_crawl {
+            if let Err(err) = self.crawl_and_archive_url(&url).await {
+                println!("Unable to crawl/archive {} due to {}", url, err);
+            }
+            break;
+        }
+
+        Ok(())
+    }
+
+    /// Web Archive (WARC) file format definition: https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1
+    async fn crawl_and_archive_url(&mut self, url: &str) -> anyhow::Result<()> {
+        let resp = self.client.get(url).send().await?;
+        self.archiver.archive_response(resp).await?;
         Ok(())
     }
 
