@@ -1,23 +1,97 @@
 use std::fmt::Write;
-use std::io::BufWriter;
-use std::{fs::File, path::Path};
+use std::io::{BufWriter, Read};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 use chrono::prelude::*;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use reqwest::Response;
-use warc::{BufferedBody, RawRecordHeader, Record, RecordType, WarcHeader, WarcWriter};
+use warc::{BufferedBody, RawRecordHeader, Record, RecordType, WarcHeader, WarcReader, WarcWriter};
+
+const ARCHIVE_FILE: &str = "archive.warc";
 
 pub struct Archiver {
+    path: PathBuf,
     writer: WarcWriter<BufWriter<File>>,
 }
 
-impl Archiver {
-    pub fn new(storage: &Path) -> anyhow::Result<Self> {
-        // let mut file = WarcWriter::from_path_gzip(self.storage.join("warc.gz"))
-        //     .unwrap();
+pub struct ArchiveRecord {
+    pub headers: Vec<(String, String)>,
+    pub content: String,
+}
 
+impl Archiver {
+    fn parse_body(body: &str) -> (Vec<(String, String)>, String) {
+        let mut headers = Vec::new();
+        let mut content = String::new();
+
+        let mut headers_finished = false;
+        for line in body.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                headers_finished = true;
+            } else {
+                match headers_finished {
+                    true => content.push_str(trimmed),
+                    false => {
+                        if let Some((key, value)) = trimmed.split_once(':') {
+                            headers.push((key.trim().to_string(), value.trim().to_string()));
+                        }
+                    }
+                }
+            }
+        }
+
+        (headers, content)
+    }
+
+    pub fn new(storage: &Path) -> anyhow::Result<Self> {
+        let path = storage.join(ARCHIVE_FILE);
         Ok(Self {
-            writer: WarcWriter::from_path(storage.join("archive.warc"))?,
+            path: path.clone(),
+            writer: WarcWriter::from_path(path)?,
         })
+    }
+
+    pub fn read(path: &Path) -> anyhow::Result<Vec<ArchiveRecord>> {
+        let mut warc_path = path.join(ARCHIVE_FILE);
+        warc_path.set_extension("warc.gz");
+
+        // Unzip
+        let file = std::fs::read(&warc_path)?;
+        let mut d = GzDecoder::new(&file[..]);
+        let mut s = String::new();
+        d.read_to_string(&mut s)?;
+
+        let mut records = Vec::new();
+        let reader = WarcReader::new(s.as_bytes());
+
+        for record in reader.iter_records() {
+            let record = record?;
+            let body = String::from_utf8(record.body().into())?;
+            let (headers, content) = Archiver::parse_body(&body);
+            records.push(ArchiveRecord { headers, content });
+        }
+
+        Ok(records)
+    }
+
+    pub fn finish(&self) -> anyhow::Result<()> {
+        use std::io::Write;
+        let file = std::fs::read(&self.path)?;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&file)?;
+
+        // Compress archive & remove the old file.
+        let mut compressed = self.path.clone();
+        compressed.set_extension("warc.gz");
+        std::fs::write(compressed, encoder.finish()?)?;
+        std::fs::remove_file(&self.path)?;
+        Ok(())
     }
 
     pub fn generate_header(url: &str, content_length: usize) -> RawRecordHeader {
@@ -78,11 +152,6 @@ impl Archiver {
         let warc_header = Self::generate_header(&url, content.len());
 
         let bytes_written = self.writer.write_raw(warc_header, &content)?;
-        println!("Wrote {} bytes", bytes_written);
-
-        // if let Ok(gzip_stream) = file.into_inner() {
-        //     gzip_stream.finish().into_result()?;
-        // }
         Ok(bytes_written)
     }
 }

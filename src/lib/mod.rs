@@ -12,7 +12,7 @@ use sitemap::reader::{SiteMapEntity, SiteMapReader};
 use spyglass_lens::LensConfig;
 use texting_robots::Robot;
 
-mod archive;
+pub mod archive;
 mod cdx;
 mod robots;
 
@@ -28,6 +28,16 @@ fn http_client() -> Client {
         .user_agent(APP_USER_AGENT)
         .build()
         .expect("Unable to create HTTP client")
+}
+
+pub fn cache_storage_path(lens: &LensConfig) -> PathBuf {
+    let storage = Path::new(&lens.name).to_path_buf();
+    if !storage.exists() {
+        // No point in continuing if we're unable to create this directory
+        std::fs::create_dir_all(storage.clone()).expect("Unable to create crawl folder");
+    }
+
+    storage
 }
 
 struct NetrunnerState {
@@ -51,12 +61,7 @@ impl Netrunner {
     pub fn new(lens: LensConfig) -> Self {
         let client = http_client();
         let robots = Robots::new();
-        let storage = Path::new(&lens.name).to_path_buf();
-        if !storage.exists() {
-            // No point in continuing if we're unable to create this directory
-            std::fs::create_dir_all(storage.clone()).expect("Unable to create crawl folder");
-        }
-
+        let storage = cache_storage_path(&lens);
         let state = NetrunnerState {
             has_urls: storage.join("urls.txt").exists(),
         };
@@ -131,13 +136,20 @@ impl Netrunner {
         // CRAWL BABY CRAWL
         let mut to_crawl: Vec<String> = self.to_crawl.clone().into_iter().collect();
         to_crawl.sort();
+
+        let mut i = 0;
         for url in to_crawl {
             if let Err(err) = self.crawl_and_archive_url(&url).await {
                 println!("Unable to crawl/archive {} due to {}", url, err);
             }
-            break;
+            i += 1;
+
+            if i > 10 {
+                break;
+            }
         }
 
+        self.archiver.finish()?;
         Ok(())
     }
 
