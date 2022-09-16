@@ -31,7 +31,7 @@ fn http_client() -> Client {
 }
 
 pub fn cache_storage_path(lens: &LensConfig) -> PathBuf {
-    let storage = Path::new(&lens.name).to_path_buf();
+    let storage = Path::new("archives").join(&lens.name).to_path_buf();
     if !storage.exists() {
         // No point in continuing if we're unable to create this directory
         std::fs::create_dir_all(storage.clone()).expect("Unable to create crawl folder");
