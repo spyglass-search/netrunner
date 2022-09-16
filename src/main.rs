@@ -10,6 +10,7 @@ use lib::{cache_storage_path, Netrunner};
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 struct Cli {
+    /// Lens file
     #[clap(short, long, value_parser, value_name = "FILE")]
     lens_file: PathBuf,
     #[clap(subcommand)]
@@ -18,8 +19,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Grabs all the URLs represented by <lens-file> for review.
     CheckUrls,
+    /// Crawls & creates a web archive for the pages represented by <lens-file>
     Crawl,
+    /// Validate the lens file and, if available, the cached web archive for <lens-file>
     Validate,
 }
 
