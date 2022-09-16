@@ -16,8 +16,8 @@ use sitemap::reader::{SiteMapEntity, SiteMapReader};
 use spyglass_lens::LensConfig;
 use texting_robots::Robot;
 use tokio::task::JoinHandle;
-use tokio_retry::Retry;
 use tokio_retry::strategy::ExponentialBackoff;
+use tokio_retry::Retry;
 use url::Url;
 
 pub mod archive;
@@ -39,7 +39,7 @@ fn http_client() -> Client {
 }
 
 pub fn cache_storage_path(lens: &LensConfig) -> PathBuf {
-    let storage = Path::new("archives").join(&lens.name).to_path_buf();
+    let storage = Path::new("archives").join(&lens.name);
     if !storage.exists() {
         // No point in continuing if we're unable to create this directory
         std::fs::create_dir_all(storage.clone()).expect("Unable to create crawl folder");
@@ -84,7 +84,7 @@ impl Netrunner {
     }
 
     /// Kick off a crawl for URLs represented by <lens>.
-    pub async fn crawl(&mut self) -> Result<()> {
+    pub async fn crawl(&mut self, print_urls: bool, create_crawl_archive: bool) -> Result<()> {
         let mut robots = Robots::new();
         // ------------------------------------------------------------------------
         // First, build filters based on the lens. This will be used to filter out
@@ -137,10 +137,20 @@ impl Netrunner {
                 .extend(file.lines().map(|x| x.to_string()).collect::<Vec<String>>());
         }
 
-        // CRAWL BABY CRAWL
-        // Default to max 2 requests per second for a domain.
-        let quota = Quota::per_second(nonzero!(2u32));
-        self.crawl_loop(quota).await?;
+        if print_urls {
+            let mut sorted_urls = self.to_crawl.clone().into_iter().collect::<Vec<String>>();
+            sorted_urls.sort();
+            for url in sorted_urls {
+                println!("{}", url);
+            }
+        }
+
+        if create_crawl_archive {
+            // CRAWL BABY CRAWL
+            // Default to max 2 requests per second for a domain.
+            let quota = Quota::per_second(nonzero!(2u32));
+            self.crawl_loop(quota).await?;
+        }
 
         Ok(())
     }
@@ -150,13 +160,11 @@ impl Netrunner {
         let mut archiver = Archiver::new(&self.storage).expect("Unable to create archiver");
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
 
-        let to_crawl: Vec<String> = self.to_crawl.clone().into_iter().collect();
+        let to_crawl = self.to_crawl.clone().into_iter();
 
         // Spin up tasks to crawl through everything
         let tasks: Vec<JoinHandle<Option<Response>>> = to_crawl
-            .into_iter()
             .map(|url| {
-                let url = url.clone();
                 let lim = lim.clone();
                 tokio::spawn(async move {
                     let parsed_url = Url::parse(&url).expect("Invalid URL");
@@ -171,21 +179,24 @@ impl Netrunner {
                         println!("fetching {}", url);
                         if let Ok(resp) = client.get(&url).send().await {
                             if resp.status() == StatusCode::TOO_MANY_REQUESTS {
-                                let retry_after_ms: u64 = resp.headers().get("Retry-After")
-                                    .map_or(1000, |header| {
+                                let retry_after_ms: u64 =
+                                    resp.headers().get("Retry-After").map_or(1000, |header| {
                                         if let Ok(header) = header.to_str() {
-                                            u64::from_str_radix(header, 10)
-                                                .unwrap_or(1000)
+                                            header.parse::<u64>().unwrap_or(1000)
                                         } else {
                                             1000
                                         }
                                     });
 
                                 println!("429 received... retrying after {}ms", retry_after_ms);
-                                tokio::time::sleep(tokio::time::Duration::from_millis(retry_after_ms)).await;
-                                return Err(());
+                                tokio::time::sleep(tokio::time::Duration::from_millis(
+                                    retry_after_ms,
+                                ))
+                                .await;
+
+                                Err(())
                             } else {
-                                return Ok(resp);
+                                Ok(resp)
                             }
                         } else {
                             Err(())
@@ -218,7 +229,10 @@ impl Netrunner {
         }
 
         archiver.finish()?;
-        println!("Finished crawl. {} good, {} bad", good_responses, bad_responses);
+        println!(
+            "Finished crawl. {} good, {} bad",
+            good_responses, bad_responses
+        );
 
         Ok(())
     }

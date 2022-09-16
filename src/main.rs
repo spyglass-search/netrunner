@@ -18,6 +18,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    CheckUrls,
     Crawl,
     Validate,
 }
@@ -31,9 +32,13 @@ fn main() -> Result<(), anyhow::Error> {
 
     let lens = LensConfig::from_path(cli.lens_file.clone())?;
     match &cli.command {
+        Commands::CheckUrls => {
+            let mut netrunner = Netrunner::new(lens);
+            runtime.block_on(netrunner.crawl(true, false))
+        }
         Commands::Crawl => {
             let mut netrunner = Netrunner::new(lens);
-            runtime.block_on(netrunner.crawl())
+            runtime.block_on(netrunner.crawl(false, true))
         }
         Commands::Validate => {
             // Check that we can read the WARC file
