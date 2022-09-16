@@ -202,12 +202,17 @@ impl Netrunner {
 
         // Archive responses
         let responses = future::join_all(tasks).await;
+        let mut good_responses = 0;
+        let mut bad_responses = 0;
+
         for result in responses {
             match result {
                 Ok(Some(response)) => {
+                    good_responses += 1;
                     archiver.archive_response(response).await?;
                 }
                 Err(err) => {
+                    bad_responses += 1;
                     println!("Invalid result: {}", err);
                 }
                 _ => {}
@@ -215,6 +220,7 @@ impl Netrunner {
         }
 
         archiver.finish()?;
+        println!("Finished crawl. {} good, {} bad", good_responses, bad_responses);
 
         Ok(())
     }
