@@ -10,6 +10,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use reqwest::Response;
+use serde::{Deserialize, Serialize};
 use warc::{BufferedBody, RawRecordHeader, Record, RecordType, WarcHeader, WarcReader, WarcWriter};
 
 const ARCHIVE_FILE: &str = "archive.warc";
@@ -19,9 +20,35 @@ pub struct Archiver {
     writer: WarcWriter<BufWriter<File>>,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct ArchiveRecord {
+    pub url: String,
     pub headers: Vec<(String, String)>,
     pub content: String,
+}
+
+impl ArchiveRecord {
+    pub async fn from_response(resp: Response) -> anyhow::Result<Self> {
+        let headers: Vec<(String, String)> = resp
+            .headers()
+            .into_iter()
+            .filter_map(|(name, value)| {
+                if let Ok(value) = value.to_str() {
+                    Some((name.to_string(), value.to_string()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let url = resp.url().as_str().to_string();
+        let content = resp.text().await?;
+        Ok(ArchiveRecord {
+            url,
+            headers,
+            content,
+        })
+    }
 }
 
 impl Archiver {
@@ -72,9 +99,17 @@ impl Archiver {
 
         for record in reader.iter_records() {
             let record = record?;
+            let url = record
+                .header(WarcHeader::TargetURI)
+                .expect("TargetURI not set")
+                .to_string();
             let body = String::from_utf8(record.body().into())?;
             let (headers, content) = Archiver::parse_body(&body);
-            records.push(ArchiveRecord { headers, content });
+            records.push(ArchiveRecord {
+                url,
+                headers,
+                content,
+            });
         }
 
         Ok(records)
@@ -136,18 +171,16 @@ impl Archiver {
         }
     }
 
-    pub async fn archive_response(&mut self, resp: Response) -> anyhow::Result<usize> {
-        let url = resp.url().as_str().to_owned();
+    pub async fn archive_record(&mut self, record: &ArchiveRecord) -> anyhow::Result<usize> {
+        let url = record.url.clone();
 
         // Output headers into HTTP format
         let mut headers = "HTTP/1.1 200 OK\n".to_string();
-        for (name, value) in resp.headers() {
-            if let Ok(value) = value.to_str() {
-                let _ = writeln!(headers, "{}: {}", name, value);
-            }
+        for (name, value) in record.headers.iter() {
+            let _ = writeln!(headers, "{}: {}", name, value);
         }
 
-        let body = resp.text().await.unwrap();
+        let body = record.content.clone();
         let content = format!("{}\n{}", headers, body);
         let warc_header = Self::generate_header(&url, content.len());
 

@@ -1,6 +1,9 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use std::{collections::HashSet, io::Read};
 
 use anyhow::Result;
@@ -11,7 +14,7 @@ use futures::future;
 use governor::{Quota, RateLimiter};
 use nonzero_ext::nonzero;
 use regex::{RegexSet, RegexSetBuilder};
-use reqwest::{Client, Response, StatusCode};
+use reqwest::{Client, StatusCode};
 use sitemap::reader::{SiteMapEntity, SiteMapReader};
 use spyglass_lens::LensConfig;
 use texting_robots::Robot;
@@ -24,7 +27,7 @@ pub mod archive;
 mod cdx;
 mod robots;
 
-use archive::Archiver;
+use archive::{ArchiveRecord, Archiver};
 use robots::Robots;
 
 static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"));
@@ -48,6 +51,16 @@ pub fn cache_storage_path(lens: &LensConfig) -> PathBuf {
     storage
 }
 
+pub fn tmp_storage_path(lens: &LensConfig) -> PathBuf {
+    let storage = Path::new("tmp").join(&lens.name);
+    if !storage.exists() {
+        // No point in continuing if we're unable to create this directory
+        std::fs::create_dir_all(storage.clone()).expect("Unable to create crawl folder");
+    }
+
+    storage
+}
+
 #[derive(Clone)]
 struct NetrunnerState {
     has_urls: bool,
@@ -61,6 +74,7 @@ pub struct Netrunner {
     cdx_queue: HashSet<String>,
     // Urls gathered from sitemaps + cdx processing.
     to_crawl: HashSet<String>,
+    // Where the cached web archive will be storage
     storage: PathBuf,
     state: NetrunnerState,
 }
@@ -148,35 +162,69 @@ impl Netrunner {
         if create_crawl_archive {
             // CRAWL BABY CRAWL
             // Default to max 2 requests per second for a domain.
-            let quota = Quota::per_second(nonzero!(2u32));
-            self.crawl_loop(quota).await?;
+            let quota = Quota::per_second(nonzero!(3u32));
+            self.crawl_loop(tmp_storage_path(&self.lens), quota).await?;
         }
 
         Ok(())
     }
 
+    fn cached_records(&self, tmp_storage: &PathBuf) -> Vec<ArchiveRecord> {
+        let paths = std::fs::read_dir(tmp_storage).expect("unable to read dir");
+        let mut recs = Vec::new();
+        for path in paths.flatten() {
+            let record = ron::from_str::<ArchiveRecord>(
+                &std::fs::read_to_string(path.path()).expect("Unable to read file"),
+            )
+            .expect("Unable to deserialize record");
+            recs.push(record);
+        }
+
+        recs
+    }
+
     /// Web Archive (WARC) file format definition: https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1
-    async fn crawl_loop(&mut self, quota: Quota) -> anyhow::Result<()> {
+    async fn crawl_loop(&mut self, tmp_storage: PathBuf, quota: Quota) -> anyhow::Result<()> {
         let mut archiver = Archiver::new(&self.storage).expect("Unable to create archiver");
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
 
+        let progress = Arc::new(AtomicUsize::new(0));
+        let total = self.to_crawl.len();
         let to_crawl = self.to_crawl.clone().into_iter();
+        let mut already_crawled: HashSet<String> = HashSet::new();
+
+        // Before we begin, check to see if we've already crawled anything
+        let recs = self.cached_records(&tmp_storage);
+        for rec in recs {
+            already_crawled.insert(rec.url);
+        }
+        println!(
+            "beginning crawl, already crawled {} urls",
+            already_crawled.len()
+        );
 
         // Spin up tasks to crawl through everything
-        let tasks: Vec<JoinHandle<Option<Response>>> = to_crawl
-            .map(|url| {
+        let tasks: Vec<JoinHandle<()>> = to_crawl
+            .filter_map(|url| {
+                if already_crawled.contains(&url) {
+                    println!("-> skipping {}, already crawled", url);
+                    return None;
+                }
+
+                let progress = progress.clone();
                 let lim = lim.clone();
-                tokio::spawn(async move {
+                let tmp_storage = tmp_storage.clone();
+
+                let res = tokio::spawn(async move {
                     let parsed_url = Url::parse(&url).expect("Invalid URL");
                     let domain = parsed_url.domain().expect("No domain in URL");
                     let client = http_client();
 
                     // Retry if we run into 429 / timeout errors
                     let retry_strat = ExponentialBackoff::from_millis(100).take(3);
-                    let res = Retry::spawn(retry_strat, || async {
+                    let _ = Retry::spawn(retry_strat, || async {
                         // Wait for when we can crawl this based on the domain
                         lim.until_key_ready(&domain.to_string()).await;
-                        println!("fetching {}", url);
                         if let Ok(resp) = client.get(&url).send().await {
                             if resp.status() == StatusCode::TOO_MANY_REQUESTS {
                                 let retry_after_ms: u64 =
@@ -196,7 +244,17 @@ impl Netrunner {
 
                                 Err(())
                             } else {
-                                Ok(resp)
+                                println!("fetched {}: {}", resp.status(), url);
+                                // Save response to tmp storage
+                                if let Ok(record) = ArchiveRecord::from_response(resp).await {
+                                    if let Ok(serialized) = ron::to_string(&record) {
+                                        let id = uuid::Uuid::new_v4();
+                                        let file = tmp_storage.join(id.to_string());
+                                        let _ = std::fs::write(file, serialized);
+                                    }
+                                }
+
+                                Ok(())
                             }
                         } else {
                             Err(())
@@ -204,35 +262,27 @@ impl Netrunner {
                     })
                     .await;
 
-                    res.ok()
-                })
+                    let old_val = progress.fetch_add(1, Ordering::SeqCst);
+                    if old_val % 100 == 0 {
+                        println!("progress: {} / {}", old_val, total)
+                    }
+                });
+
+                Some(res)
             })
             .collect();
 
         // Archive responses
-        let responses = future::join_all(tasks).await;
-        let mut good_responses = 0;
-        let mut bad_responses = 0;
+        let _ = future::join_all(tasks).await;
 
-        for result in responses {
-            match result {
-                Ok(Some(response)) => {
-                    good_responses += 1;
-                    archiver.archive_response(response).await?;
-                }
-                Err(err) => {
-                    bad_responses += 1;
-                    println!("Invalid result: {}", err);
-                }
-                _ => {}
-            }
+        println!("archiving responses");
+        let recs = self.cached_records(&tmp_storage);
+        for rec in recs {
+            archiver.archive_record(&rec).await?;
         }
 
         archiver.finish()?;
-        println!(
-            "Finished crawl. {} good, {} bad",
-            good_responses, bad_responses
-        );
+        println!("Finished crawl");
 
         Ok(())
     }

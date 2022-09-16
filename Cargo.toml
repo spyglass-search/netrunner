@@ -22,5 +22,6 @@ spyglass-lens = "0.1"
 texting_robots = "0.2.1"
 tokio = { version = "1.0", features = ["full"] }
 tokio-retry = "0.3"
+uuid = { version = "1.1.2", features = ["v4", "fast-rng"]}
 url = "2.3"
 warc = "0.3"
