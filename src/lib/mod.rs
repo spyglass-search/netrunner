@@ -138,6 +138,7 @@ impl Netrunner {
         }
 
         // CRAWL BABY CRAWL
+        // Default to max 2 requests per second for a domain.
         let quota = Quota::per_second(nonzero!(2u32));
         self.crawl_loop(quota).await?;
 
@@ -147,13 +148,11 @@ impl Netrunner {
     /// Web Archive (WARC) file format definition: https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1
     async fn crawl_loop(&mut self, quota: Quota) -> anyhow::Result<()> {
         let mut archiver = Archiver::new(&self.storage).expect("Unable to create archiver");
-
-        // Default to 1 a second
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
 
-        let mut to_crawl: Vec<String> = self.to_crawl.clone().into_iter().collect();
-        to_crawl.sort();
+        let to_crawl: Vec<String> = self.to_crawl.clone().into_iter().collect();
 
+        // Spin up tasks to crawl through everything
         let tasks: Vec<JoinHandle<Option<Response>>> = to_crawl
             .into_iter()
             .map(|url| {
@@ -164,9 +163,8 @@ impl Netrunner {
                     let domain = parsed_url.domain().expect("No domain in URL");
                     let client = http_client();
 
-                    // Crawl!
+                    // Retry if we run into 429 / timeout errors
                     let retry_strat = ExponentialBackoff::from_millis(100).take(3);
-                    // If we're hitting the CDX endpoint too fast, wait a little bit before retrying.
                     let res = Retry::spawn(retry_strat, || async {
                         // Wait for when we can crawl this based on the domain
                         lim.until_key_ready(&domain.to_string()).await;
@@ -183,7 +181,7 @@ impl Netrunner {
                                         }
                                     });
 
-                                println!("429 received... retrying after {}", retry_after_ms);
+                                println!("429 received... retrying after {}ms", retry_after_ms);
                                 tokio::time::sleep(tokio::time::Duration::from_millis(retry_after_ms)).await;
                                 return Err(());
                             } else {
