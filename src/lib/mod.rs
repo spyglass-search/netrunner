@@ -1,16 +1,24 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::{collections::HashSet, io::Read};
 
 use anyhow::Result;
 use async_recursion::async_recursion;
 use bytes::buf::Buf;
 use flate2::bufread::GzDecoder;
+use futures::future;
+use governor::{Quota, RateLimiter};
+use nonzero_ext::nonzero;
 use regex::{RegexSet, RegexSetBuilder};
-use reqwest::Client;
+use reqwest::{Client, Response, StatusCode};
 use sitemap::reader::{SiteMapEntity, SiteMapReader};
 use spyglass_lens::LensConfig;
 use texting_robots::Robot;
+use tokio::task::JoinHandle;
+use tokio_retry::Retry;
+use tokio_retry::strategy::ExponentialBackoff;
+use url::Url;
 
 pub mod archive;
 mod cdx;
@@ -40,13 +48,14 @@ pub fn cache_storage_path(lens: &LensConfig) -> PathBuf {
     storage
 }
 
+#[derive(Clone)]
 struct NetrunnerState {
     has_urls: bool,
 }
 
+#[derive(Clone)]
 pub struct Netrunner {
     client: Client,
-    robots: Robots,
     lens: LensConfig,
     // Urls that need to be processed through a cdx index.
     cdx_queue: HashSet<String>,
@@ -54,24 +63,18 @@ pub struct Netrunner {
     to_crawl: HashSet<String>,
     storage: PathBuf,
     state: NetrunnerState,
-    archiver: Archiver,
 }
 
 impl Netrunner {
     pub fn new(lens: LensConfig) -> Self {
         let client = http_client();
-        let robots = Robots::new();
         let storage = cache_storage_path(&lens);
         let state = NetrunnerState {
             has_urls: storage.join("urls.txt").exists(),
         };
 
-        let archiver = Archiver::new(&storage).expect("Unable to create archiver");
-
         Netrunner {
-            archiver,
             client,
-            robots,
             lens,
             storage,
             state,
@@ -82,6 +85,7 @@ impl Netrunner {
 
     /// Kick off a crawl for URLs represented by <lens>.
     pub async fn crawl(&mut self) -> Result<()> {
+        let mut robots = Robots::new();
         // ------------------------------------------------------------------------
         // First, build filters based on the lens. This will be used to filter out
         // urls from sitemaps / cdx indexes
@@ -100,7 +104,7 @@ impl Netrunner {
         println!("-> Fetching robots.txt & sitemaps.xml");
         for domain in self.lens.domains.iter() {
             let domain_url = format!("http://{}", domain);
-            if !self.robots.process_url(&domain_url).await {
+            if !robots.process_url(&domain_url).await {
                 self.cdx_queue.insert(domain_url);
             }
         }
@@ -114,7 +118,7 @@ impl Netrunner {
             };
 
             // If there is no sitemaps in the robots, add to CDX queue
-            if !self.robots.process_url(url).await {
+            if !robots.process_url(url).await {
                 self.cdx_queue.insert(url.to_owned());
             }
         }
@@ -124,7 +128,7 @@ impl Netrunner {
         // urls to crawl.
         // ------------------------------------------------------------------------
         if !self.state.has_urls {
-            self.fetch_urls(&allowed, &skipped).await;
+            self.fetch_urls(&robots, &allowed, &skipped).await;
         } else {
             println!("-> Already collected URLs, skipping");
             // Load urls from file
@@ -134,29 +138,84 @@ impl Netrunner {
         }
 
         // CRAWL BABY CRAWL
-        let mut to_crawl: Vec<String> = self.to_crawl.clone().into_iter().collect();
-        to_crawl.sort();
+        let quota = Quota::per_second(nonzero!(2u32));
+        self.crawl_loop(quota).await?;
 
-        let mut i = 0;
-        for url in to_crawl {
-            if let Err(err) = self.crawl_and_archive_url(&url).await {
-                println!("Unable to crawl/archive {} due to {}", url, err);
-            }
-            i += 1;
-
-            if i > 10 {
-                break;
-            }
-        }
-
-        self.archiver.finish()?;
         Ok(())
     }
 
     /// Web Archive (WARC) file format definition: https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1
-    async fn crawl_and_archive_url(&mut self, url: &str) -> anyhow::Result<()> {
-        let resp = self.client.get(url).send().await?;
-        self.archiver.archive_response(resp).await?;
+    async fn crawl_loop(&mut self, quota: Quota) -> anyhow::Result<()> {
+        let mut archiver = Archiver::new(&self.storage).expect("Unable to create archiver");
+
+        // Default to 1 a second
+        let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
+
+        let mut to_crawl: Vec<String> = self.to_crawl.clone().into_iter().collect();
+        to_crawl.sort();
+
+        let tasks: Vec<JoinHandle<Option<Response>>> = to_crawl
+            .into_iter()
+            .map(|url| {
+                let url = url.clone();
+                let lim = lim.clone();
+                tokio::spawn(async move {
+                    let parsed_url = Url::parse(&url).expect("Invalid URL");
+                    let domain = parsed_url.domain().expect("No domain in URL");
+                    let client = http_client();
+
+                    // Crawl!
+                    let retry_strat = ExponentialBackoff::from_millis(100).take(3);
+                    // If we're hitting the CDX endpoint too fast, wait a little bit before retrying.
+                    let res = Retry::spawn(retry_strat, || async {
+                        // Wait for when we can crawl this based on the domain
+                        lim.until_key_ready(&domain.to_string()).await;
+                        println!("fetching {}", url);
+                        if let Ok(resp) = client.get(&url).send().await {
+                            if resp.status() == StatusCode::TOO_MANY_REQUESTS {
+                                let retry_after_ms: u64 = resp.headers().get("Retry-After")
+                                    .map_or(1000, |header| {
+                                        if let Ok(header) = header.to_str() {
+                                            u64::from_str_radix(header, 10)
+                                                .unwrap_or(1000)
+                                        } else {
+                                            1000
+                                        }
+                                    });
+
+                                println!("429 received... retrying after {}", retry_after_ms);
+                                tokio::time::sleep(tokio::time::Duration::from_millis(retry_after_ms)).await;
+                                return Err(());
+                            } else {
+                                return Ok(resp);
+                            }
+                        } else {
+                            Err(())
+                        }
+                    })
+                    .await;
+
+                    res.ok()
+                })
+            })
+            .collect();
+
+        // Archive responses
+        let responses = future::join_all(tasks).await;
+        for result in responses {
+            match result {
+                Ok(Some(response)) => {
+                    archiver.archive_response(response).await?;
+                }
+                Err(err) => {
+                    println!("Invalid result: {}", err);
+                }
+                _ => {}
+            }
+        }
+
+        archiver.finish()?;
+
         Ok(())
     }
 
@@ -223,9 +282,9 @@ impl Netrunner {
         urls
     }
 
-    pub async fn fetch_urls(&mut self, allowed: &RegexSet, skipped: &RegexSet) {
+    pub async fn fetch_urls(&mut self, robots: &Robots, allowed: &RegexSet, skipped: &RegexSet) {
         // Crawl sitemaps
-        for robot in self.robots.cache.values().flatten() {
+        for robot in robots.cache.values().flatten() {
             if !robot.sitemaps.is_empty() {
                 for sitemap in &robot.sitemaps {
                     self.to_crawl
