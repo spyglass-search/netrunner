@@ -29,7 +29,10 @@ pub struct ArchiveRecord {
 }
 
 impl ArchiveRecord {
-    pub async fn from_response(resp: Response) -> anyhow::Result<Self> {
+    pub async fn from_response(
+        resp: Response,
+        url_override: Option<String>,
+    ) -> anyhow::Result<Self> {
         let headers: Vec<(String, String)> = resp
             .headers()
             .into_iter()
@@ -43,7 +46,12 @@ impl ArchiveRecord {
             .collect();
 
         let status = resp.status().as_u16();
-        let url = resp.url().as_str().to_string();
+        let url = if let Some(url_override) = url_override {
+            url_override
+        } else {
+            resp.url().as_str().to_string()
+        };
+
         let content = resp.text().await?;
         Ok(ArchiveRecord {
             status,

@@ -9,6 +9,19 @@ static ARCHIVE_CDX_ENDPOINT: &str = "https://web.archive.org/cdx/search/cdx";
 type CDXResumeKey = Option<String>;
 type FetchCDXResult = anyhow::Result<(HashSet<String>, CDXResumeKey)>;
 
+const ARCHIVE_WEB_ENDPOINT: &str = "https://web.archive.org/web";
+
+pub fn create_archive_url(url: &str) -> String {
+    // Always try to grab the latest archived crawl
+    let date = Utc::now();
+    format!(
+        "{}/{}000000id_/{}",
+        ARCHIVE_WEB_ENDPOINT,
+        date.format("%Y%m%d"),
+        url
+    )
+}
+
 pub async fn fetch_cdx(
     client: &Client,
     prefix: &str,
