@@ -53,7 +53,11 @@ fn main() -> Result<(), anyhow::Error> {
     let lens = LensConfig::from_path(lens_file)?;
     match &cli.command {
         Commands::CheckUrls => {
+            // Remove previous urls.txt if any
             let mut netrunner = Netrunner::new(lens);
+            if netrunner.url_txt_path().exists() {
+                let _ = std::fs::remove_file(netrunner.url_txt_path());
+            }
             runtime.block_on(netrunner.crawl(true, false))
         }
         Commands::Crawl => {

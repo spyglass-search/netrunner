@@ -75,7 +75,7 @@ pub struct Netrunner {
     // Urls gathered from sitemaps + cdx processing.
     to_crawl: HashSet<String>,
     // Where the cached web archive will be storage
-    storage: PathBuf,
+    pub storage: PathBuf,
     state: NetrunnerState,
 }
 
@@ -97,6 +97,10 @@ impl Netrunner {
         }
     }
 
+    pub fn url_txt_path(&self) -> PathBuf {
+        self.storage.join("urls.txt")
+    }
+
     /// Kick off a crawl for URLs represented by <lens>.
     pub async fn crawl(&mut self, print_urls: bool, create_crawl_archive: bool) -> Result<()> {
         let mut robots = Robots::new();
@@ -104,7 +108,7 @@ impl Netrunner {
         // First, build filters based on the lens. This will be used to filter out
         // urls from sitemaps / cdx indexes
         // ------------------------------------------------------------------------
-        println!("-> Loading rules");
+        eprintln!("-> Loading rules");
         let filters = self.lens.into_regexes();
         let allowed = RegexSetBuilder::new(filters.allowed)
             .size_limit(100_000_000)
@@ -116,7 +120,7 @@ impl Netrunner {
         // ------------------------------------------------------------------------
         // Second, we fetch robots & sitemaps from the domains/urls represented by the lens
         // ------------------------------------------------------------------------
-        println!("-> Fetching robots.txt & sitemaps.xml");
+        eprintln!("-> Fetching robots.txt & sitemaps.xml");
         for domain in self.lens.domains.iter() {
             let domain_url = format!("http://{}", domain);
             if !robots.process_url(&domain_url).await {
@@ -145,9 +149,9 @@ impl Netrunner {
         if !self.state.has_urls {
             self.fetch_urls(&robots, &allowed, &skipped).await;
         } else {
-            println!("-> Already collected URLs, skipping");
+            eprintln!("-> Already collected URLs, skipping");
             // Load urls from file
-            let file = std::fs::read_to_string(self.storage.join("urls.txt"))?;
+            let file = std::fs::read_to_string(self.url_txt_path())?;
             self.to_crawl
                 .extend(file.lines().map(|x| x.to_string()).collect::<Vec<String>>());
         }
@@ -155,9 +159,10 @@ impl Netrunner {
         if print_urls {
             let mut sorted_urls = self.to_crawl.clone().into_iter().collect::<Vec<String>>();
             sorted_urls.sort();
-            for url in sorted_urls {
+            for url in &sorted_urls {
                 println!("{}", url);
             }
+            eprintln!("Discovered {} urls for lens", sorted_urls.len());
         }
 
         if create_crawl_archive {
@@ -300,7 +305,7 @@ impl Netrunner {
         allowed: &RegexSet,
         skipped: &RegexSet,
     ) -> Vec<String> {
-        println!("fetching sitemap: {}", sitemap_url);
+        eprintln!("fetching sitemap: {}", sitemap_url);
         let mut urls = Vec::new();
 
         if let Ok(resp) = self.client.get(sitemap_url).send().await {
@@ -350,7 +355,7 @@ impl Netrunner {
             }
         }
 
-        println!("found {} urls for {}", urls.len(), sitemap_url);
+        eprintln!("found {} urls for {}", urls.len(), sitemap_url);
         urls
     }
 
@@ -368,7 +373,7 @@ impl Netrunner {
         // Process any URLs in the cdx queue
         for prefix in self.cdx_queue.iter() {
             let mut resume_key = None;
-            println!("fetching cdx for: {}", prefix);
+            eprintln!("fetching cdx for: {}", prefix);
             while let Ok((urls, resume)) =
                 cdx::fetch_cdx(&self.client, prefix, 1000, resume_key.clone()).await
             {
@@ -384,7 +389,7 @@ impl Netrunner {
                     })
                     .collect::<Vec<String>>();
 
-                println!("found {} urls", filtered.len());
+                eprintln!("found {} urls", filtered.len());
                 self.to_crawl.extend(filtered);
                 if resume.is_none() {
                     break;
@@ -395,7 +400,7 @@ impl Netrunner {
         }
 
         // Write out URLs to crawl folder
-        let mut file = std::fs::File::create(self.storage.join("urls.txt")).expect("create failed");
+        let mut file = std::fs::File::create(self.url_txt_path()).expect("create failed");
 
         let mut sorted = self
             .to_crawl
