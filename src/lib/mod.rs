@@ -163,7 +163,7 @@ impl Netrunner {
         if create_crawl_archive {
             // CRAWL BABY CRAWL
             // Default to max 2 requests per second for a domain.
-            let quota = Quota::per_second(nonzero!(3u32));
+            let quota = Quota::per_second(nonzero!(5u32));
             self.crawl_loop(tmp_storage_path(&self.lens), quota).await?;
         }
 
@@ -279,7 +279,10 @@ impl Netrunner {
         println!("archiving responses");
         let recs = self.cached_records(&tmp_storage);
         for rec in recs {
-            archiver.archive_record(&rec).await?;
+            // Only save successes to the archive
+            if rec.status >= 200 && rec.status <= 299 {
+                archiver.archive_record(&rec).await?;
+            }
         }
 
         archiver.finish()?;

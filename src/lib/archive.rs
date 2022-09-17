@@ -22,6 +22,7 @@ pub struct Archiver {
 
 #[derive(Serialize, Deserialize)]
 pub struct ArchiveRecord {
+    pub status: u16,
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub content: String,
@@ -41,9 +42,11 @@ impl ArchiveRecord {
             })
             .collect();
 
+        let status = resp.status().as_u16();
         let url = resp.url().as_str().to_string();
         let content = resp.text().await?;
         Ok(ArchiveRecord {
+            status,
             url,
             headers,
             content,
@@ -106,6 +109,7 @@ impl Archiver {
             let body = String::from_utf8(record.body().into())?;
             let (headers, content) = Archiver::parse_body(&body);
             records.push(ArchiveRecord {
+                status: 200u16,
                 url,
                 headers,
                 content,
