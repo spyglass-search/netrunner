@@ -104,6 +104,7 @@ impl Netrunner {
         // First, build filters based on the lens. This will be used to filter out
         // urls from sitemaps / cdx indexes
         // ------------------------------------------------------------------------
+        println!("-> Loading rules");
         let filters = self.lens.into_regexes();
         let allowed = RegexSetBuilder::new(filters.allowed)
             .size_limit(100_000_000)
@@ -368,7 +369,20 @@ impl Netrunner {
             while let Ok((urls, resume)) =
                 cdx::fetch_cdx(&self.client, prefix, 1000, resume_key.clone()).await
             {
-                self.to_crawl.extend(urls);
+                let filtered = urls.into_iter()
+                    .filter(|url| {
+                        if allowed.is_match(&url)
+                            && !skipped.is_match(&url)
+                        {
+                            return true;
+                        }
+
+                        return false;
+                    })
+                    .collect::<Vec<String>>();
+
+                println!("found {} urls", filtered.len());
+                self.to_crawl.extend(filtered);
                 if resume.is_none() {
                     break;
                 }

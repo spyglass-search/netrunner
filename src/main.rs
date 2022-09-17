@@ -18,7 +18,7 @@ struct Cli {
     command: Commands,
 }
 
-#[derive(Subcommand, PartialEq, Eq)]
+#[derive(Debug, Subcommand, PartialEq, Eq)]
 enum Commands {
     /// Grabs all the URLs represented by <lens-file> for review.
     CheckUrls,
@@ -50,7 +50,6 @@ fn main() -> Result<(), anyhow::Error> {
     }
 
     let lens_file = cli.lens_file.expect("Expecting lens file");
-
     let lens = LensConfig::from_path(lens_file)?;
     match &cli.command {
         Commands::CheckUrls => {
