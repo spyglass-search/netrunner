@@ -1,6 +1,6 @@
-use std::path::Path;
 use clap::{Parser, Subcommand};
 use spyglass_lens::LensConfig;
+use std::path::Path;
 use std::path::PathBuf;
 use tokio::runtime;
 
@@ -95,7 +95,7 @@ fn main() -> Result<(), anyhow::Error> {
                 }
                 Err(e) => Err(e),
             }
-        },
-        _ => Ok(())
+        }
+        _ => Ok(()),
     }
 }

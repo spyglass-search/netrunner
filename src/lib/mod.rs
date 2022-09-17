@@ -310,46 +310,41 @@ impl Netrunner {
 
         if let Ok(resp) = self.client.get(sitemap_url).send().await {
             if resp.status().is_success() {
-                if let Ok(text) = resp.bytes().await {
-                    let mut buf = String::new();
-                    // Decode gzipped files. Doesn't work automatically if they were
-                    // gzipped before uploading it to their destination.
-                    if sitemap_url.ends_with(".gz") {
+                let mut buf = String::new();
+                // Decode gzipped files. Doesn't work automatically if they were
+                // gzipped before uploading it to their destination.
+                if sitemap_url.ends_with(".gz") {
+                    if let Ok(text) = resp.bytes().await {
                         let mut decoder = GzDecoder::new(text.reader());
                         decoder.read_to_string(&mut buf).unwrap();
-                    } else {
-                        let res = String::from_utf8((&text).to_vec());
-                        // Received an invalid text blob from the server
-                        if res.is_err() {
-                            return Vec::new();
-                        }
-                        buf = res.expect("Unable to convert to UTF-8");
                     }
+                } else if let Ok(text) = resp.text().await {
+                    buf = text.replace('\u{feff}', "");
+                }
 
-                    let parser = SiteMapReader::new(buf.as_bytes());
-                    for entity in parser {
-                        match entity {
-                            SiteMapEntity::Url(url_entry) => {
-                                if let Some(loc) = url_entry.loc.get_url() {
-                                    let url = loc.to_string();
-                                    if robot.allowed(&url)
-                                        && allowed.is_match(&url)
-                                        && !skipped.is_match(&url)
-                                    {
-                                        urls.push(url);
-                                    }
+                let parser = SiteMapReader::new(buf.as_bytes());
+                for entity in parser {
+                    match entity {
+                        SiteMapEntity::Url(url_entry) => {
+                            if let Some(loc) = url_entry.loc.get_url() {
+                                let url = loc.to_string();
+                                if robot.allowed(&url)
+                                    && allowed.is_match(&url)
+                                    && !skipped.is_match(&url)
+                                {
+                                    urls.push(url);
                                 }
                             }
-                            SiteMapEntity::SiteMap(sitemap_entry) => {
-                                if let Some(loc) = sitemap_entry.loc.get_url() {
-                                    urls.extend(
-                                        self.fetch_sitemap(robot, loc.as_str(), allowed, skipped)
-                                            .await,
-                                    );
-                                }
-                            }
-                            _ => {}
                         }
+                        SiteMapEntity::SiteMap(sitemap_entry) => {
+                            if let Some(loc) = sitemap_entry.loc.get_url() {
+                                urls.extend(
+                                    self.fetch_sitemap(robot, loc.as_str(), allowed, skipped)
+                                        .await,
+                                );
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -377,15 +372,14 @@ impl Netrunner {
             while let Ok((urls, resume)) =
                 cdx::fetch_cdx(&self.client, prefix, 1000, resume_key.clone()).await
             {
-                let filtered = urls.into_iter()
+                let filtered = urls
+                    .into_iter()
                     .filter(|url| {
-                        if allowed.is_match(&url)
-                            && !skipped.is_match(&url)
-                        {
+                        if allowed.is_match(url) && !skipped.is_match(url) {
                             return true;
                         }
 
-                        return false;
+                        false
                     })
                     .collect::<Vec<String>>();
 
