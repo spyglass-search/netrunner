@@ -1,3 +1,4 @@
+use std::path::Path;
 use clap::{Parser, Subcommand};
 use spyglass_lens::LensConfig;
 use std::path::PathBuf;
@@ -12,15 +13,16 @@ use lib::{cache_storage_path, Netrunner};
 struct Cli {
     /// Lens file
     #[clap(short, long, value_parser, value_name = "FILE")]
-    lens_file: PathBuf,
+    lens_file: Option<PathBuf>,
     #[clap(subcommand)]
     command: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, PartialEq, Eq)]
 enum Commands {
     /// Grabs all the URLs represented by <lens-file> for review.
     CheckUrls,
+    Clean,
     /// Crawls & creates a web archive for the pages represented by <lens-file>
     Crawl,
     /// Validate the lens file and, if available, the cached web archive for <lens-file>
@@ -34,7 +36,22 @@ fn main() -> Result<(), anyhow::Error> {
         .thread_name("netrunner-worker")
         .build()?;
 
-    let lens = LensConfig::from_path(cli.lens_file.clone())?;
+    if cli.command == Commands::Clean {
+        println!("Cleaning up temp directories/files");
+        let tmp = Path::new("tmp");
+        if tmp.exists() {
+            std::fs::remove_dir_all("tmp")?;
+        }
+        return Ok(());
+    }
+
+    if cli.lens_file.is_none() {
+        return Err(anyhow::anyhow!("Please provide a lens file".to_string()));
+    }
+
+    let lens_file = cli.lens_file.expect("Expecting lens file");
+
+    let lens = LensConfig::from_path(lens_file)?;
     match &cli.command {
         Commands::CheckUrls => {
             let mut netrunner = Netrunner::new(lens);
@@ -75,6 +92,7 @@ fn main() -> Result<(), anyhow::Error> {
                 }
                 Err(e) => Err(e),
             }
-        }
+        },
+        _ => Ok(())
     }
 }
