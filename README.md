@@ -2,6 +2,14 @@
 
 `netrunner` is a tool to help build, validate, & create archives for Spyglass lenses.
 
+## Installing the CLI
+
+```
+cargo install --path .
+```
+
+## Running the CLI
+
 ```
 netrunner 0.1.0
 
@@ -20,6 +28,7 @@ SUBCOMMANDS:
     validate      Validate the lens file and, if available, the cached web archive for
                       <lens-file>
 ```
+
 
 ## Commands in depth
 
