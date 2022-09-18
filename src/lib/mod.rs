@@ -71,36 +71,40 @@ async fn fetch_page(
     page_store: &Path,
 ) -> Result<(), ()> {
     // Wait for when we can crawl this based on the domain
-    if let Ok(resp) = client.get(url).send().await {
-        if resp.status() == StatusCode::TOO_MANY_REQUESTS {
-            let retry_after_ms: u64 = resp.headers().get("Retry-After").map_or(RETRY_DELAY_MS, |header| {
-                if let Ok(header) = header.to_str() {
-                    eprintln!("found Retry-After: {}", header);
-                    header.parse::<u64>().unwrap_or(RETRY_DELAY_MS)
-                } else {
-                    RETRY_DELAY_MS
-                }
-            });
+    match client.get(url).send().await {
+        Ok(resp) => {
+            if resp.status() == StatusCode::TOO_MANY_REQUESTS {
+                let retry_after_ms: u64 = resp.headers().get("Retry-After").map_or(RETRY_DELAY_MS, |header| {
+                    if let Ok(header) = header.to_str() {
+                        eprintln!("found Retry-After: {}", header);
+                        header.parse::<u64>().unwrap_or(RETRY_DELAY_MS)
+                    } else {
+                        RETRY_DELAY_MS
+                    }
+                });
 
-            println!("429 received... retrying after {}ms", retry_after_ms);
-            tokio::time::sleep(tokio::time::Duration::from_millis(retry_after_ms)).await;
+                println!("429 received... retrying after {}ms", retry_after_ms);
+                tokio::time::sleep(tokio::time::Duration::from_millis(retry_after_ms)).await;
 
-            Err(())
-        } else {
-            println!("fetched {}: {}", resp.status(), url);
-            // Save response to tmp storage
-            if let Ok(record) = ArchiveRecord::from_response(resp, url_override).await {
-                if let Ok(serialized) = ron::to_string(&record) {
-                    let id = uuid::Uuid::new_v4();
-                    let file = page_store.join(id.to_string());
-                    let _ = std::fs::write(file, serialized);
+                Err(())
+            } else {
+                println!("fetched {}: {}", resp.status(), url);
+                // Save response to tmp storage
+                if let Ok(record) = ArchiveRecord::from_response(resp, url_override).await {
+                    if let Ok(serialized) = ron::to_string(&record) {
+                        let id = uuid::Uuid::new_v4();
+                        let file = page_store.join(id.to_string());
+                        let _ = std::fs::write(file, serialized);
+                    }
                 }
+
+                Ok(())
             }
-
-            Ok(())
+        },
+        Err(err) => {
+            eprintln!("Err {}: {}", err, url);
+            Err(())
         }
-    } else {
-        Err(())
     }
 }
 
@@ -251,6 +255,7 @@ impl Netrunner {
             "beginning crawl, already crawled {} urls",
             already_crawled.len()
         );
+        progress.store(already_crawled.len(), Ordering::SeqCst);
 
         // Spin up tasks to crawl through everything
         let tasks: Vec<JoinHandle<()>> = to_crawl
