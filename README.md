@@ -1,6 +1,17 @@
 ## netrunner
 
-`netrunner` is a tool to help build, validate, & create archives for Spyglass lenses.
+`netrunner` is a tool to help build, validate, & create archives for
+[Spyglass][spyglass-link] lenses.
+
+Lenses are a [simple set of rules][lens-docs] that tell a crawler which URLs it
+should crawl. Combined w/ data from sitemaps and/or the Internet Archive, `netrunner`
+can crawl and created an archive of the pages represented by the lens.
+
+In Spyglass, this is used to create a personalized search engine that only crawls
+& indexes sites/pages/data that you're interested in.
+
+[spyglass-link]: https://github.com/a5huynh/spyglass
+[lens-docs]: https://docs.spyglass.fyi/usage/lenses/index.html
 
 ## Installing the CLI
 
