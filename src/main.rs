@@ -22,6 +22,7 @@ struct Cli {
 enum Commands {
     /// Grabs all the URLs represented by <lens-file> for review.
     CheckUrls,
+    /// Removes temporary directories/files
     Clean,
     /// Crawls & creates a web archive for the pages represented by <lens-file>
     Crawl,

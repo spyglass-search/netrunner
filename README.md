@@ -15,17 +15,26 @@ In Spyglass, this is used to create a personalized search engine that only crawl
 
 ## Installing the CLI
 
+From [crates.io](https://crates.io/crates/spyglass-netrunner):
+```
+cargo install spyglass-netrunner
+```
+
+or from source:
 ```
 cargo install --path .
 ```
 
+
 ## Running the CLI
 
 ```
-netrunner 0.1.0
+spyglass-netrunner 0.1.0
+Andrew Huynh <andrew@spyglass.fyi>
+A small CLI utility to help build lenses for spyglass
 
 USAGE:
-    netrunner --lens-file <FILE> <SUBCOMMAND>
+    spyglass-netrunner [OPTIONS] <SUBCOMMAND>
 
 OPTIONS:
     -h, --help                Print help information
@@ -34,6 +43,7 @@ OPTIONS:
 
 SUBCOMMANDS:
     check-urls    Grabs all the URLs represented by <lens-file> for review
+    clean         Removes temporary directories/files
     crawl         Crawls & creates a web archive for the pages represented by <lens-file>
     help          Print this message or the help of the given subcommand(s)
     validate      Validate the lens file and, if available, the cached web archive for
