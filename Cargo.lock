@@ -731,33 +731,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "netrunner"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-recursion",
- "bytes",
- "chrono",
- "clap",
- "flate2",
- "futures",
- "governor",
- "nonzero_ext",
- "regex",
- "reqwest",
- "ron",
- "serde",
- "sitemap",
- "spyglass-lens",
- "texting_robots",
- "tokio",
- "tokio-retry",
- "url",
- "uuid 1.1.2",
- "warc",
-]
-
-[[package]]
 name = "no-std-compat"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1287,6 +1260,33 @@ dependencies = [
  "regex",
  "ron",
  "serde",
+]
+
+[[package]]
+name = "spyglass-netrunner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-recursion",
+ "bytes",
+ "chrono",
+ "clap",
+ "flate2",
+ "futures",
+ "governor",
+ "nonzero_ext",
+ "regex",
+ "reqwest",
+ "ron",
+ "serde",
+ "sitemap",
+ "spyglass-lens",
+ "texting_robots",
+ "tokio",
+ "tokio-retry",
+ "url",
+ "uuid 1.1.2",
+ "warc",
 ]
 
 [[package]]

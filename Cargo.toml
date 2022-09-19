@@ -1,7 +1,14 @@
 [package]
-name = "netrunner"
+name = "spyglass-netrunner"
 version = "0.1.0"
+authors = ["Andrew Huynh <andrew@spyglass.fyi>"]
+description = "A small CLI utility to help build lenses for spyglass"
 edition = "2021"
+homepage = "https://github.com/spyglass-search/netrunner"
+keywords = ["spyglass", "cli", "warc"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/spyglass-search/netrunner"
 
 [dependencies]
 anyhow = "1.0"
