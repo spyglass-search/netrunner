@@ -32,3 +32,7 @@ tokio-retry = "0.3"
 uuid = { version = "1.1.2", features = ["v4", "fast-rng"]}
 url = "2.3"
 warc = "0.3"
+
+[[bin]]
+name = "netrunner"
+path = "src/main.rs"
