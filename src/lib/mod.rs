@@ -74,14 +74,17 @@ async fn fetch_page(
     match client.get(url).send().await {
         Ok(resp) => {
             if resp.status() == StatusCode::TOO_MANY_REQUESTS {
-                let retry_after_ms: u64 = resp.headers().get("Retry-After").map_or(RETRY_DELAY_MS, |header| {
-                    if let Ok(header) = header.to_str() {
-                        eprintln!("found Retry-After: {}", header);
-                        header.parse::<u64>().unwrap_or(RETRY_DELAY_MS)
-                    } else {
-                        RETRY_DELAY_MS
-                    }
-                });
+                let retry_after_ms: u64 =
+                    resp.headers()
+                        .get("Retry-After")
+                        .map_or(RETRY_DELAY_MS, |header| {
+                            if let Ok(header) = header.to_str() {
+                                eprintln!("found Retry-After: {}", header);
+                                header.parse::<u64>().unwrap_or(RETRY_DELAY_MS)
+                            } else {
+                                RETRY_DELAY_MS
+                            }
+                        });
 
                 println!("429 received... retrying after {}ms", retry_after_ms);
                 tokio::time::sleep(tokio::time::Duration::from_millis(retry_after_ms)).await;
@@ -100,7 +103,7 @@ async fn fetch_page(
 
                 Ok(())
             }
-        },
+        }
         Err(err) => {
             eprintln!("Err {}: {}", err, url);
             Err(())
