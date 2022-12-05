@@ -4,9 +4,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use tokio::runtime;
 
-mod lib;
-use lib::archive::Archiver;
-use lib::{cache_storage_path, Netrunner};
+use libnetrunner::archive::Archiver;
+use libnetrunner::{cache_storage_path, Netrunner};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]

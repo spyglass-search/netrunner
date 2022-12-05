@@ -36,3 +36,7 @@ warc = "0.3"
 [[bin]]
 name = "netrunner"
 path = "src/main.rs"
+
+[lib]
+name = "libnetrunner"
+path = "src/lib/mod.rs"

@@ -30,7 +30,7 @@ mod robots;
 use archive::{ArchiveRecord, Archiver};
 use robots::Robots;
 
-use crate::lib::cdx::create_archive_url;
+use crate::cdx::create_archive_url;
 
 static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"));
 const RETRY_DELAY_MS: u64 = 5000;
