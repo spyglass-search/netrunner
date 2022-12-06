@@ -1,4 +1,4 @@
-.PHONY: install build publish
+.PHONY: build build-docker install publish
 
 build:
 	cargo build
