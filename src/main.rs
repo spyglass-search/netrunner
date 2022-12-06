@@ -46,7 +46,9 @@ fn main() -> Result<(), anyhow::Error> {
     }
 
     if cli.lens_file.is_none() {
-        return Err(anyhow::anyhow!("Please point to either a local lens file or an HTTPS link.".to_string()));
+        return Err(anyhow::anyhow!(
+            "Please point to either a local lens file or an HTTPS link.".to_string()
+        ));
     }
 
     let lens_file = cli.lens_file.expect("Expecting lens file");
@@ -82,11 +84,10 @@ fn main() -> Result<(), anyhow::Error> {
             match Archiver::read(&path) {
                 Ok(records) => {
                     println!("Validating archive.");
-                    let urls_txt =  std::fs::read_to_string(path.join("urls.txt"))
-                        .expect("urls.txt not found");
-                    let expected_urls: HashSet<String> = urls_txt.lines()
-                        .map(|x| x.to_string())
-                        .collect();
+                    let urls_txt =
+                        std::fs::read_to_string(path.join("urls.txt")).expect("urls.txt not found");
+                    let expected_urls: HashSet<String> =
+                        urls_txt.lines().map(|x| x.to_string()).collect();
 
                     let mut zero_len_headers = 0;
                     let mut zero_len_content = 0;
@@ -112,9 +113,8 @@ fn main() -> Result<(), anyhow::Error> {
                         println!("Found {} 0-length content", zero_len_content);
                     }
 
-                    let missing_urls: Vec<String> = expected_urls.difference(&found_urls)
-                        .cloned()
-                        .collect();
+                    let missing_urls: Vec<String> =
+                        expected_urls.difference(&found_urls).cloned().collect();
 
                     println!("{} missing urls", missing_urls.len());
                     println!("{:?}", missing_urls);
