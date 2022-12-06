@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use spyglass_lens::LensConfig;
+use std::collections::HashSet;
 use std::path::Path;
-use std::path::PathBuf;
 use tokio::runtime;
 
 use libnetrunner::archive::Archiver;
@@ -12,7 +12,7 @@ use libnetrunner::{cache_storage_path, Netrunner};
 struct Cli {
     /// Lens file
     #[clap(short, long, value_parser, value_name = "FILE")]
-    lens_file: Option<PathBuf>,
+    lens_file: Option<String>,
     #[clap(subcommand)]
     command: Commands,
 }
@@ -46,11 +46,22 @@ fn main() -> Result<(), anyhow::Error> {
     }
 
     if cli.lens_file.is_none() {
-        return Err(anyhow::anyhow!("Please provide a lens file".to_string()));
+        return Err(anyhow::anyhow!("Please point to either a local lens file or an HTTPS link.".to_string()));
     }
 
     let lens_file = cli.lens_file.expect("Expecting lens file");
-    let lens = LensConfig::from_path(lens_file)?;
+    let lens = if lens_file.starts_with("http") {
+        // Attempt to read download and read file from internet
+        println!("Detected URL, attempting to download lens file.");
+        let resp = runtime.block_on(async move {
+            let resp = reqwest::get(lens_file).await?;
+            resp.text().await
+        })?;
+        ron::from_str(&resp)?
+    } else {
+        LensConfig::from_path(Path::new(&lens_file).to_path_buf())?
+    };
+
     match &cli.command {
         Commands::CheckUrls => {
             // Remove previous urls.txt if any
@@ -66,13 +77,24 @@ fn main() -> Result<(), anyhow::Error> {
         }
         Commands::Validate => {
             // Check that we can read the WARC file
+            println!("Checking for archive file.");
             let path = cache_storage_path(&lens);
             match Archiver::read(&path) {
                 Ok(records) => {
+                    println!("Validating archive.");
+                    let urls_txt =  std::fs::read_to_string(path.join("urls.txt"))
+                        .expect("urls.txt not found");
+                    let expected_urls: HashSet<String> = urls_txt.lines()
+                        .map(|x| x.to_string())
+                        .collect();
+
                     let mut zero_len_headers = 0;
                     let mut zero_len_content = 0;
 
+                    let mut found_urls: HashSet<String> = HashSet::new();
                     for rec in &records {
+                        found_urls.insert(rec.url.clone());
+
                         if rec.headers.is_empty() {
                             zero_len_headers += 1;
                         }
@@ -89,6 +111,13 @@ fn main() -> Result<(), anyhow::Error> {
                     if zero_len_content > 0 {
                         println!("Found {} 0-length content", zero_len_content);
                     }
+
+                    let missing_urls: Vec<String> = expected_urls.difference(&found_urls)
+                        .cloned()
+                        .collect();
+
+                    println!("{} missing urls", missing_urls.len());
+                    println!("{:?}", missing_urls);
 
                     println!("Found & validated {} records", records.len());
                     Ok(())
