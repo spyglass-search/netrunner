@@ -98,6 +98,7 @@ impl Archiver {
     pub fn read(path: &Path) -> anyhow::Result<Vec<ArchiveRecord>> {
         let mut warc_path = path.join(ARCHIVE_FILE);
         warc_path.set_extension("warc.gz");
+        println!("Reading archive: {}", warc_path.display());
 
         // Unzip
         let file = std::fs::read(&warc_path)?;
@@ -107,23 +108,24 @@ impl Archiver {
 
         let mut records = Vec::new();
         let reader = WarcReader::new(s.as_bytes());
-
-        for record in reader.iter_records() {
-            let record = record?;
+        for record in reader.iter_records().flatten() {
             let url = record
                 .header(WarcHeader::TargetURI)
                 .expect("TargetURI not set")
                 .to_string();
-            let body = String::from_utf8(record.body().into())?;
-            let (headers, content) = Archiver::parse_body(&body);
-            records.push(ArchiveRecord {
-                status: 200u16,
-                url,
-                headers,
-                content,
-            });
+
+            if let Ok(body) = String::from_utf8(record.body().into()) {
+                let (headers, content) = Archiver::parse_body(&body);
+                records.push(ArchiveRecord {
+                    status: 200u16,
+                    url,
+                    headers,
+                    content,
+                });
+            }
         }
 
+        println!("Found {} records", records.len());
         Ok(records)
     }
 
