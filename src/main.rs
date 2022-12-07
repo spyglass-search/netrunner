@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use spyglass_lens::LensConfig;
 use std::collections::HashSet;
@@ -105,22 +106,32 @@ fn main() -> Result<(), anyhow::Error> {
                         }
                     }
 
+                    let mut failed_validation = false;
                     if zero_len_headers > 0 {
                         println!("Found {} 0-length headers", zero_len_headers);
+                        failed_validation = true;
                     }
 
                     if zero_len_content > 0 {
                         println!("Found {} 0-length content", zero_len_content);
+                        failed_validation = true;
                     }
 
                     let missing_urls: Vec<String> =
                         expected_urls.difference(&found_urls).cloned().collect();
 
-                    println!("{} missing urls", missing_urls.len());
-                    println!("{:?}", missing_urls);
+                    if missing_urls.len() > 0 {
+                        println!("{} missing urls", missing_urls.len());
+                        println!("{:?}", missing_urls);
+                        failed_validation = true;
+                    }
 
                     println!("Found & validated {} records", records.len());
-                    Ok(())
+                    if failed_validation {
+                        Err(anyhow!("Failed validation"))
+                    } else {
+                        Ok(())
+                    }
                 }
                 Err(e) => Err(e),
             }
