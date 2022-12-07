@@ -19,6 +19,7 @@ clap = { version = "4.0", features = ["derive"] }
 flate2 = "1.0.24"
 futures = "0.3"
 governor = "0.5"
+log = "0.4"
 nonzero_ext = "0.3.0"
 regex = "1.0"
 reqwest = { version = "0.11", features = ["gzip"] }
@@ -27,6 +28,9 @@ serde = { version = "1.0", features = ["derive"] }
 sitemap = "0.4.1"
 spyglass-lens = "0.1"
 texting_robots = "0.2.1"
+tracing = "0.1"
+tracing-log = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "std"]}
 tokio = { version = "1.0", features = ["full"] }
 tokio-retry = "0.3"
 uuid = { version = "1.1.2", features = ["v4", "fast-rng"]}

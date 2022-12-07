@@ -98,7 +98,7 @@ impl Archiver {
     pub fn read(path: &Path) -> anyhow::Result<Vec<ArchiveRecord>> {
         let mut warc_path = path.join(ARCHIVE_FILE);
         warc_path.set_extension("warc.gz");
-        println!("Reading archive: {}", warc_path.display());
+        log::info!("Reading archive: {}", warc_path.display());
 
         // Unzip
         let file = std::fs::read(&warc_path)?;
@@ -125,21 +125,29 @@ impl Archiver {
             }
         }
 
-        println!("Found {} records", records.len());
+        log::info!("Found {} records", records.len());
         Ok(records)
     }
 
     pub fn finish(&self) -> anyhow::Result<()> {
         use std::io::Write;
         let file = std::fs::read(&self.path)?;
+        log::debug!("compressing data from {}", self.path.display());
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&file)?;
 
         // Compress archive & remove the old file.
         let mut compressed = self.path.clone();
         compressed.set_extension("warc.gz");
-        std::fs::write(compressed, encoder.finish()?)?;
-        std::fs::remove_file(&self.path)?;
+        if compressed.exists() {
+            log::warn!("{} exists, removing!", compressed.display());
+            std::fs::remove_file(compressed.clone())?;
+        }
+
+        std::fs::write(compressed.clone(), encoder.finish()?)?;
+        log::debug!("saved to: {}", compressed.display());
+
+        // std::fs::remove_file(&self.path)?;
         Ok(())
     }
 
@@ -187,6 +195,7 @@ impl Archiver {
 
     pub async fn archive_record(&mut self, record: &ArchiveRecord) -> anyhow::Result<usize> {
         let url = record.url.clone();
+        log::debug!("archiving {}", url);
 
         // Output headers into HTTP format
         let mut headers = "HTTP/1.1 200 OK\n".to_string();
@@ -199,6 +208,7 @@ impl Archiver {
         let warc_header = Self::generate_header(&url, content.len());
 
         let bytes_written = self.writer.write_raw(warc_header, &content)?;
+        log::debug!("wrote {} bytes", bytes_written);
         Ok(bytes_written)
     }
 }
