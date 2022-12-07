@@ -102,7 +102,7 @@ async fn fetch_page(
                         let mut hasher = DefaultHasher::new();
                         record.url.hash(&mut hasher);
                         let id = hasher.finish().to_string();
-                        let file = page_store.join(id.to_string());
+                        let file = page_store.join(id);
                         let _ = std::fs::write(file.clone(), serialized);
                         log::debug!("cached <{}> -> <{}>", record.url, file.display());
                     }

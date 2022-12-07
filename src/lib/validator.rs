@@ -10,7 +10,7 @@ use crate::cache_storage_path;
 pub fn validate_lens(lens: &LensConfig) -> Result<()> {
     // Check that we can read the WARC file
     log::info!("Checking for archive file.");
-    let path = cache_storage_path(&lens);
+    let path = cache_storage_path(lens);
     match Archiver::read(&path) {
         Ok(records) => {
             let mut failed_validation = false;
