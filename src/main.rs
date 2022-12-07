@@ -104,24 +104,3 @@ fn main() -> Result<(), anyhow::Error> {
         _ => Ok(()),
     }
 }
-
-#[cfg(test)]
-mod test {
-    use libnetrunner::{validator::validate_lens, Netrunner};
-    use spyglass_lens::LensConfig;
-    use std::path::Path;
-
-    #[tokio::test]
-    async fn test_crawl() {
-        let lens_file = "fixtures/test.ron";
-        let lens = LensConfig::from_path(Path::new(&lens_file).to_path_buf())
-            .expect("Unable to load lens file");
-
-        // Test crawling logic
-        let mut netrunner = Netrunner::new(lens.clone());
-        netrunner.crawl(false, true).await.expect("Unable to crawl");
-
-        // Test validation logic
-        validate_lens(&lens).expect("Unable to validate lens");
-    }
-}

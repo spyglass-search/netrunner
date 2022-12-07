@@ -453,3 +453,43 @@ impl Netrunner {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use spyglass_lens::LensConfig;
+    use std::io;
+    use std::path::Path;
+    use tracing_log::LogTracer;
+    use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
+
+    use crate::{validator::validate_lens, Netrunner};
+
+    #[tokio::test]
+    async fn test_crawl() {
+        // Setup some nice console logging for tests
+        let subscriber = tracing_subscriber::registry()
+            .with(
+                EnvFilter::from_default_env()
+                    .add_directive(tracing::Level::INFO.into())
+                    .add_directive("libnetrunner=TRACE".parse().expect("invalid log filter")),
+            )
+            .with(fmt::Layer::new().with_ansi(false).with_writer(io::stdout));
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("Unable to set a global subscriber");
+        LogTracer::init().expect("Unable to initialize logger");
+
+        let lens_file = "fixtures/test.ron";
+        let lens = LensConfig::from_path(Path::new(&lens_file).to_path_buf())
+            .expect("Unable to load lens file");
+
+        // Test crawling logic
+        let mut netrunner = Netrunner::new(lens.clone());
+        netrunner.crawl(false, true).await.expect("Unable to crawl");
+
+        // Test validation logic
+        if let Err(err) = validate_lens(&lens) {
+            eprintln!("Failed validation: {}", err);
+            panic!("Failed");
+        }
+    }
+}
