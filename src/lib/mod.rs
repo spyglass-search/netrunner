@@ -28,6 +28,7 @@ use url::Url;
 pub mod archive;
 mod cdx;
 mod robots;
+pub mod validator;
 
 use archive::{ArchiveRecord, Archiver};
 use robots::Robots;
@@ -234,14 +235,12 @@ impl Netrunner {
     }
 
     fn cached_records(&self, tmp_storage: &PathBuf) -> Vec<ArchiveRecord> {
-        let paths = std::fs::read_dir(tmp_storage)
-            .expect("unable to read tmp storage dir");
+        let paths = std::fs::read_dir(tmp_storage).expect("unable to read tmp storage dir");
 
         let mut recs = Vec::new();
         for path in paths.flatten() {
             let record = ron::from_str::<ArchiveRecord>(
-                &std::fs::read_to_string(path.path())
-                    .expect("Unable to read cache file"),
+                &std::fs::read_to_string(path.path()).expect("Unable to read cache file"),
             )
             .expect("Unable to deserialize record");
             recs.push(record);
