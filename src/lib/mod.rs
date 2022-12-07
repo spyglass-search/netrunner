@@ -181,7 +181,9 @@ impl Netrunner {
         for prefix in self.lens.urls.iter() {
             let url = if prefix.ends_with('$') {
                 // Remove the '$' suffix and add to the crawl queue
-                prefix.strip_suffix('$').expect("No $ at end of prefix")
+                let url = prefix.trim_end_matches('$');
+                self.to_crawl.insert(url.to_string());
+                continue;
             } else {
                 prefix
             };
