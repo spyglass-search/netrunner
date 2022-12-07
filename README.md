@@ -38,7 +38,7 @@ USAGE:
 
 OPTIONS:
     -h, --help                Print help information
-    -l, --lens-file <FILE>    Lens file
+    -l, --lens-file <FILE>    Lens file (./example.ron or https://example.com/lens.ron)
     -V, --version             Print version information
 
 SUBCOMMANDS:
