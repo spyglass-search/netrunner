@@ -129,25 +129,44 @@ impl Archiver {
         Ok(records)
     }
 
-    pub fn finish(&self) -> anyhow::Result<()> {
+    pub fn finish(self) -> anyhow::Result<()> {
         use std::io::Write;
+        // Make sure our buffer has been flushed to the filesystem.
+        if let Ok(mut inner_writer) = self.writer.into_inner() {
+            let _ = inner_writer.flush();
+        }
+
+        // Read file from filesystem & compress.
         let file = std::fs::read(&self.path)?;
-        log::debug!("compressing data from {}", self.path.display());
+        let before = file.len();
+        log::debug!(
+            "compressing data from {} | {} bytes",
+            self.path.display(),
+            before
+        );
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&file)?;
 
-        // Compress archive & remove the old file.
-        let mut compressed = self.path.clone();
+        // Check to see if we have an existing archive & remove it.
+        let mut compressed = self.path;
         compressed.set_extension("warc.gz");
         if compressed.exists() {
             log::warn!("{} exists, removing!", compressed.display());
             std::fs::remove_file(compressed.clone())?;
         }
 
-        std::fs::write(compressed.clone(), encoder.finish()?)?;
-        log::debug!("saved to: {}", compressed.display());
+        let contents = encoder.finish()?;
+        let after = contents.len();
+        let compresion_percentage = (before as f64 - after as f64) / before as f64 * 100.0;
+        std::fs::write(compressed.clone(), contents)?;
+        log::debug!(
+            "saved to: {} | {} -> {} bytes ({:0.2}%)",
+            compressed.display(),
+            file.len(),
+            after,
+            compresion_percentage
+        );
 
-        // std::fs::remove_file(&self.path)?;
         Ok(())
     }
 
