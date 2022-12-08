@@ -1,11 +1,23 @@
 use clap::{Parser, Subcommand};
+use tracing_log::LogTracer;
+use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
+
 use spyglass_lens::LensConfig;
-use std::collections::HashSet;
+
+use std::io;
 use std::path::Path;
 use tokio::runtime;
 
-use libnetrunner::archive::Archiver;
-use libnetrunner::{cache_storage_path, Netrunner};
+use libnetrunner::validator::validate_lens;
+use libnetrunner::Netrunner;
+
+const LOG_LEVEL: tracing::Level = tracing::Level::INFO;
+
+#[cfg(debug_assertions)]
+const LIB_LOG_LEVEL: &str = "libnetrunner=DEBUG";
+
+#[cfg(not(debug_assertions))]
+const LIB_LOG_LEVEL: &str = "libnetrunner=INFO";
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -30,6 +42,17 @@ enum Commands {
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    // Setup some nice console logging
+    let subscriber = tracing_subscriber::registry()
+        .with(
+            EnvFilter::from_default_env()
+                .add_directive(LOG_LEVEL.into())
+                .add_directive(LIB_LOG_LEVEL.parse().expect("invalid log filter")),
+        )
+        .with(fmt::Layer::new().with_writer(io::stdout));
+    tracing::subscriber::set_global_default(subscriber).expect("Unable to set a global subscriber");
+    LogTracer::init()?;
+
     let cli = Cli::parse();
     let runtime = runtime::Builder::new_multi_thread()
         .enable_all()
@@ -37,7 +60,7 @@ fn main() -> Result<(), anyhow::Error> {
         .build()?;
 
     if cli.command == Commands::Clean {
-        println!("Cleaning up temp directories/files");
+        log::info!("Cleaning up temp directories/files");
         let tmp = Path::new("tmp");
         if tmp.exists() {
             std::fs::remove_dir_all("tmp")?;
@@ -54,7 +77,7 @@ fn main() -> Result<(), anyhow::Error> {
     let lens_file = cli.lens_file.expect("Expecting lens file");
     let lens = if lens_file.starts_with("http") {
         // Attempt to read download and read file from internet
-        println!("Detected URL, attempting to download lens file.");
+        log::info!("Detected URL, attempting to download lens file.");
         let resp = runtime.block_on(async move {
             let resp = reqwest::get(lens_file).await?;
             resp.text().await
@@ -77,54 +100,7 @@ fn main() -> Result<(), anyhow::Error> {
             let mut netrunner = Netrunner::new(lens);
             runtime.block_on(netrunner.crawl(false, true))
         }
-        Commands::Validate => {
-            // Check that we can read the WARC file
-            println!("Checking for archive file.");
-            let path = cache_storage_path(&lens);
-            match Archiver::read(&path) {
-                Ok(records) => {
-                    println!("Validating archive.");
-                    let urls_txt =
-                        std::fs::read_to_string(path.join("urls.txt")).expect("urls.txt not found");
-                    let expected_urls: HashSet<String> =
-                        urls_txt.lines().map(|x| x.to_string()).collect();
-
-                    let mut zero_len_headers = 0;
-                    let mut zero_len_content = 0;
-
-                    let mut found_urls: HashSet<String> = HashSet::new();
-                    for rec in &records {
-                        found_urls.insert(rec.url.clone());
-
-                        if rec.headers.is_empty() {
-                            zero_len_headers += 1;
-                        }
-
-                        if rec.content.is_empty() {
-                            zero_len_content += 1;
-                        }
-                    }
-
-                    if zero_len_headers > 0 {
-                        println!("Found {} 0-length headers", zero_len_headers);
-                    }
-
-                    if zero_len_content > 0 {
-                        println!("Found {} 0-length content", zero_len_content);
-                    }
-
-                    let missing_urls: Vec<String> =
-                        expected_urls.difference(&found_urls).cloned().collect();
-
-                    println!("{} missing urls", missing_urls.len());
-                    println!("{:?}", missing_urls);
-
-                    println!("Found & validated {} records", records.len());
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            }
-        }
+        Commands::Validate => validate_lens(&lens),
         _ => Ok(()),
     }
 }

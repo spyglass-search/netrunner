@@ -1,0 +1,10 @@
+(
+    version: "1",
+    name: "test_lens",
+    author: "spyglass",
+    description: Some("Spyglass Test Lens"),
+    domains: [],
+    urls: [
+        "https://www.wikipedia.org$"
+    ]
+)

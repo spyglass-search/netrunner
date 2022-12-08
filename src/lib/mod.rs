@@ -1,3 +1,5 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -26,6 +28,7 @@ use url::Url;
 pub mod archive;
 mod cdx;
 mod robots;
+pub mod validator;
 
 use archive::{ArchiveRecord, Archiver};
 use robots::Robots;
@@ -79,25 +82,29 @@ async fn fetch_page(
                         .get("Retry-After")
                         .map_or(RETRY_DELAY_MS, |header| {
                             if let Ok(header) = header.to_str() {
-                                eprintln!("found Retry-After: {}", header);
+                                log::warn!("found Retry-After: {}", header);
                                 header.parse::<u64>().unwrap_or(RETRY_DELAY_MS)
                             } else {
                                 RETRY_DELAY_MS
                             }
                         });
 
-                println!("429 received... retrying after {}ms", retry_after_ms);
+                log::warn!("429 received... retrying after {}ms", retry_after_ms);
                 tokio::time::sleep(tokio::time::Duration::from_millis(retry_after_ms)).await;
 
                 Err(())
             } else {
-                println!("fetched {}: {}", resp.status(), url);
+                log::info!("fetched {}: {}", resp.status(), url);
                 // Save response to tmp storage
                 if let Ok(record) = ArchiveRecord::from_response(resp, url_override).await {
                     if let Ok(serialized) = ron::to_string(&record) {
-                        let id = uuid::Uuid::new_v4();
-                        let file = page_store.join(id.to_string());
-                        let _ = std::fs::write(file, serialized);
+                        // Hash the URL to store in the cache
+                        let mut hasher = DefaultHasher::new();
+                        record.url.hash(&mut hasher);
+                        let id = hasher.finish().to_string();
+                        let file = page_store.join(id);
+                        let _ = std::fs::write(file.clone(), serialized);
+                        log::debug!("cached <{}> -> <{}>", record.url, file.display());
                     }
                 }
 
@@ -105,7 +112,7 @@ async fn fetch_page(
             }
         }
         Err(err) => {
-            eprintln!("Err {}: {}", err, url);
+            log::error!("Unable to fetch {} - {}", url, err);
             Err(())
         }
     }
@@ -158,7 +165,7 @@ impl Netrunner {
         // First, build filters based on the lens. This will be used to filter out
         // urls from sitemaps / cdx indexes
         // ------------------------------------------------------------------------
-        eprintln!("-> Loading rules");
+        log::info!("Loading lens rules");
         let filters = self.lens.into_regexes();
         let allowed = RegexSetBuilder::new(filters.allowed)
             .size_limit(100_000_000)
@@ -170,7 +177,7 @@ impl Netrunner {
         // ------------------------------------------------------------------------
         // Second, we fetch robots & sitemaps from the domains/urls represented by the lens
         // ------------------------------------------------------------------------
-        eprintln!("-> Fetching robots.txt & sitemaps.xml");
+        log::info!("Fetching robots.txt & sitemaps.xml");
         for domain in self.lens.domains.iter() {
             let domain_url = format!("http://{}", domain);
             if !robots.process_url(&domain_url).await {
@@ -181,7 +188,9 @@ impl Netrunner {
         for prefix in self.lens.urls.iter() {
             let url = if prefix.ends_with('$') {
                 // Remove the '$' suffix and add to the crawl queue
-                prefix.strip_suffix('$').expect("No $ at end of prefix")
+                let url = prefix.trim_end_matches('$');
+                self.to_crawl.insert(url.to_string());
+                continue;
             } else {
                 prefix
             };
@@ -199,7 +208,7 @@ impl Netrunner {
         if !self.state.has_urls {
             self.fetch_urls(&robots, &allowed, &skipped).await;
         } else {
-            eprintln!("-> Already collected URLs, skipping");
+            log::info!("Already collected URLs, skipping");
             // Load urls from file
             let file = std::fs::read_to_string(self.url_txt_path())?;
             self.to_crawl
@@ -210,9 +219,9 @@ impl Netrunner {
             let mut sorted_urls = self.to_crawl.clone().into_iter().collect::<Vec<String>>();
             sorted_urls.sort();
             for url in &sorted_urls {
-                println!("{}", url);
+                log::info!("{}", url);
             }
-            eprintln!("Discovered {} urls for lens", sorted_urls.len());
+            log::info!("Discovered {} urls for lens", sorted_urls.len());
         }
 
         if create_crawl_archive {
@@ -226,11 +235,12 @@ impl Netrunner {
     }
 
     fn cached_records(&self, tmp_storage: &PathBuf) -> Vec<ArchiveRecord> {
-        let paths = std::fs::read_dir(tmp_storage).expect("unable to read dir");
+        let paths = std::fs::read_dir(tmp_storage).expect("unable to read tmp storage dir");
+
         let mut recs = Vec::new();
         for path in paths.flatten() {
             let record = ron::from_str::<ArchiveRecord>(
-                &std::fs::read_to_string(path.path()).expect("Unable to read file"),
+                &std::fs::read_to_string(path.path()).expect("Unable to read cache file"),
             )
             .expect("Unable to deserialize record");
             recs.push(record);
@@ -251,10 +261,12 @@ impl Netrunner {
 
         // Before we begin, check to see if we've already crawled anything
         let recs = self.cached_records(&tmp_storage);
+        log::debug!("found {} crawls in cache", recs.len());
         for rec in recs {
             already_crawled.insert(rec.url);
         }
-        println!(
+
+        log::info!(
             "beginning crawl, already crawled {} urls",
             already_crawled.len()
         );
@@ -264,7 +276,7 @@ impl Netrunner {
         let tasks: Vec<JoinHandle<()>> = to_crawl
             .filter_map(|url| {
                 if already_crawled.contains(&url) {
-                    println!("-> skipping {}, already crawled", url);
+                    log::info!("-> skipping {}, already crawled", url);
                     return None;
                 }
 
@@ -303,7 +315,7 @@ impl Netrunner {
 
                     let old_val = progress.fetch_add(1, Ordering::SeqCst);
                     if old_val % 100 == 0 {
-                        println!("progress: {} / {}", old_val, total)
+                        log::info!("progress: {} / {}", old_val, total)
                     }
                 });
 
@@ -314,7 +326,7 @@ impl Netrunner {
         // Archive responses
         let _ = future::join_all(tasks).await;
 
-        println!("archiving responses");
+        log::info!("Archiving responses");
         let recs = self.cached_records(&tmp_storage);
         for rec in recs {
             // Only save successes to the archive
@@ -324,7 +336,7 @@ impl Netrunner {
         }
 
         archiver.finish()?;
-        println!("Finished crawl");
+        log::info!("Finished crawl");
 
         Ok(())
     }
@@ -338,7 +350,7 @@ impl Netrunner {
         allowed: &RegexSet,
         skipped: &RegexSet,
     ) -> Vec<String> {
-        eprintln!("fetching sitemap: {}", sitemap_url);
+        log::debug!("fetching sitemap: {}", sitemap_url);
         let mut urls = Vec::new();
 
         if let Ok(resp) = self.client.get(sitemap_url).send().await {
@@ -383,7 +395,7 @@ impl Netrunner {
             }
         }
 
-        eprintln!("found {} urls for {}", urls.len(), sitemap_url);
+        log::info!("found {} urls for {}", urls.len(), sitemap_url);
         urls
     }
 
@@ -401,7 +413,7 @@ impl Netrunner {
         // Process any URLs in the cdx queue
         for prefix in self.cdx_queue.iter() {
             let mut resume_key = None;
-            eprintln!("fetching cdx for: {}", prefix);
+            log::debug!("fetching cdx for: {}", prefix);
             while let Ok((urls, resume)) =
                 cdx::fetch_cdx(&self.client, prefix, 1000, resume_key.clone()).await
             {
@@ -416,7 +428,7 @@ impl Netrunner {
                     })
                     .collect::<Vec<String>>();
 
-                eprintln!("found {} urls", filtered.len());
+                log::info!("found {} urls", filtered.len());
                 self.to_crawl.extend(filtered);
                 if resume.is_none() {
                     break;
@@ -438,6 +450,46 @@ impl Netrunner {
 
         for url in sorted {
             let _ = file.write(format!("{}\n", url).as_bytes());
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use spyglass_lens::LensConfig;
+    use std::io;
+    use std::path::Path;
+    use tracing_log::LogTracer;
+    use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
+
+    use crate::{validator::validate_lens, Netrunner};
+
+    #[tokio::test]
+    async fn test_crawl() {
+        // Setup some nice console logging for tests
+        let subscriber = tracing_subscriber::registry()
+            .with(
+                EnvFilter::from_default_env()
+                    .add_directive(tracing::Level::INFO.into())
+                    .add_directive("libnetrunner=TRACE".parse().expect("invalid log filter")),
+            )
+            .with(fmt::Layer::new().with_ansi(false).with_writer(io::stdout));
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("Unable to set a global subscriber");
+        LogTracer::init().expect("Unable to initialize logger");
+
+        let lens_file = "fixtures/test.ron";
+        let lens = LensConfig::from_path(Path::new(&lens_file).to_path_buf())
+            .expect("Unable to load lens file");
+
+        // Test crawling logic
+        let mut netrunner = Netrunner::new(lens.clone());
+        netrunner.crawl(false, true).await.expect("Unable to crawl");
+
+        // Test validation logic
+        if let Err(err) = validate_lens(&lens) {
+            eprintln!("Failed validation: {}", err);
+            panic!("Failed");
         }
     }
 }
