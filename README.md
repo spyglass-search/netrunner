@@ -29,7 +29,7 @@ cargo install --path .
 ## Running the CLI
 
 ```
-netrunner 0.1.0
+netrunner 0.1.2
 Andrew Huynh <andrew@spyglass.fyi>
 A small CLI utility to help build lenses for spyglass
 
