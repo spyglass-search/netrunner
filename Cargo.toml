@@ -16,6 +16,7 @@ async-recursion = "1.0.0"
 bytes = "1.2"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.0", features = ["derive"] }
+feedfinder = "0.4.0"
 flate2 = "1.0.24"
 futures = "0.3"
 governor = "0.5"
