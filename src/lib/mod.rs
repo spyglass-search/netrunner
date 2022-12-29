@@ -28,6 +28,7 @@ use url::Url;
 pub mod archive;
 mod cdx;
 mod robots;
+pub mod site;
 pub mod validator;
 
 use archive::{ArchiveRecord, Archiver};

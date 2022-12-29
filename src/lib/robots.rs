@@ -42,7 +42,7 @@ impl Robots {
 }
 
 /// Find and read robots.txt from a domain (if any exists)
-async fn read_robots(robots_url: &str) -> Result<Option<Robot>> {
+pub async fn read_robots(robots_url: &str) -> Result<Option<Robot>> {
     // Use a normal user-agent otherwise some sites won't let us crawl
     let client = http_client();
     if let Ok(req) = client.get(robots_url).send().await {

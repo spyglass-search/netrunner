@@ -9,7 +9,7 @@ use std::path::Path;
 use tokio::runtime;
 
 use libnetrunner::validator::validate_lens;
-use libnetrunner::Netrunner;
+use libnetrunner::{site::SiteInfo, Netrunner};
 
 const LOG_LEVEL: tracing::Level = tracing::Level::INFO;
 
@@ -31,6 +31,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
 enum Commands {
+    /// Print out useful information about a domain, such as whether there is an
+    /// rss feed, an robots.txt, and a sitemap
+    CheckDomain { domain: String },
     /// Grabs all the URLs represented by <lens-file> for review.
     CheckUrls,
     /// Removes temporary directories/files
@@ -53,54 +56,71 @@ fn main() -> Result<(), anyhow::Error> {
     tracing::subscriber::set_global_default(subscriber).expect("Unable to set a global subscriber");
     LogTracer::init()?;
 
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
     let runtime = runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("netrunner-worker")
         .build()?;
 
-    if cli.command == Commands::Clean {
-        log::info!("Cleaning up temp directories/files");
-        let tmp = Path::new("tmp");
-        if tmp.exists() {
-            std::fs::remove_dir_all("tmp")?;
-        }
-        return Ok(());
-    }
+    runtime.block_on(_run_cmd(&mut cli))
+}
 
+async fn _parse_lens(cli: &Cli) -> Result<LensConfig, anyhow::Error> {
     if cli.lens_file.is_none() {
         return Err(anyhow::anyhow!(
             "Please point to either a local lens file or an HTTPS link.".to_string()
         ));
     }
 
-    let lens_file = cli.lens_file.expect("Expecting lens file");
-    let lens = if lens_file.starts_with("http") {
+    let lens_file = cli.lens_file.as_ref().expect("Expecting lens file");
+    if lens_file.starts_with("http") {
         // Attempt to read download and read file from internet
         log::info!("Detected URL, attempting to download lens file.");
-        let resp = runtime.block_on(async move {
-            let resp = reqwest::get(lens_file).await?;
-            resp.text().await
-        })?;
-        ron::from_str(&resp)?
+        let resp = reqwest::get(lens_file).await?;
+        let resp = resp.text().await?;
+        match ron::from_str(&resp) {
+            Err(err) => Err(anyhow::anyhow!(err.to_string())),
+            Ok(res) => Ok(res),
+        }
     } else {
-        LensConfig::from_path(Path::new(&lens_file).to_path_buf())?
-    };
+        LensConfig::from_path(Path::new(&lens_file).to_path_buf())
+    }
+}
 
+async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
     match &cli.command {
+        Commands::CheckDomain { domain } => {
+            let site_info = SiteInfo::new(domain).await?;
+            site_info.print();
+
+            Ok(())
+        }
         Commands::CheckUrls => {
-            // Remove previous urls.txt if any
+            let lens = _parse_lens(cli).await?;
             let mut netrunner = Netrunner::new(lens);
+            // Remove previous urls.txt if any
             if netrunner.url_txt_path().exists() {
                 let _ = std::fs::remove_file(netrunner.url_txt_path());
             }
-            runtime.block_on(netrunner.crawl(true, false))
+            netrunner.crawl(true, false).await
+        }
+        Commands::Clean => {
+            log::info!("Cleaning up temp directories/files");
+            let tmp = Path::new("tmp");
+            if tmp.exists() {
+                std::fs::remove_dir_all("tmp")?;
+            }
+
+            Ok(())
         }
         Commands::Crawl => {
+            let lens = _parse_lens(cli).await?;
             let mut netrunner = Netrunner::new(lens);
-            runtime.block_on(netrunner.crawl(false, true))
+            netrunner.crawl(false, true).await
         }
-        Commands::Validate => validate_lens(&lens),
-        _ => Ok(()),
+        Commands::Validate => {
+            let lens = _parse_lens(cli).await?;
+            validate_lens(&lens)
+        }
     }
 }
