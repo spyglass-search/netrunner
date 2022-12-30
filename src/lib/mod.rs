@@ -11,12 +11,15 @@ use std::{collections::HashSet, io::Read};
 use anyhow::Result;
 use async_recursion::async_recursion;
 use bytes::buf::Buf;
+use feedfinder::FeedType;
 use flate2::bufread::GzDecoder;
 use futures::future;
 use governor::{Quota, RateLimiter};
 use nonzero_ext::nonzero;
 use regex::{RegexSet, RegexSetBuilder};
 use reqwest::{Client, StatusCode};
+use rss::Channel;
+use site::SiteInfo;
 use sitemap::reader::{SiteMapEntity, SiteMapReader};
 use spyglass_lens::LensConfig;
 use texting_robots::Robot;
@@ -181,6 +184,7 @@ impl Netrunner {
         log::info!("Fetching robots.txt & sitemaps.xml");
         for domain in self.lens.domains.iter() {
             let domain_url = format!("http://{}", domain);
+            // If there are no sitemaps, add to CDX queue
             if !cache.process_url(&domain_url).await {
                 self.cdx_queue.insert(domain_url);
             }
@@ -342,6 +346,31 @@ impl Netrunner {
         Ok(())
     }
 
+    async fn fetch_rss(&self, info: &SiteInfo) -> Vec<String> {
+        let mut feed_urls: Vec<String> = Vec::new();
+
+        for feed in &info.feeds {
+            match feed.feed_type() {
+                FeedType::Atom | FeedType::Rss => {
+                    if let Ok(resp) = reqwest::get(feed.url().to_string()).await {
+                        if let Ok(content) = resp.bytes().await {
+                            if let Ok(channel) = Channel::read_from(&content[..]) {
+                                for item in channel.items {
+                                    if let Some(link) = item.link {
+                                        feed_urls.push(link);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                _ => {}
+            }
+        }
+
+        feed_urls
+    }
+
     /// Fetch and parse a sitemap file
     #[async_recursion]
     async fn fetch_sitemap(
@@ -401,8 +430,12 @@ impl Netrunner {
     }
 
     pub async fn fetch_urls(&mut self, cache: &CrawlCache, allowed: &RegexSet, skipped: &RegexSet) {
-        // Crawl sitemaps
+        // Crawl sitemaps & rss feeds
         for info in cache.cache.values().flatten() {
+            // Fetch links from RSS feeds
+            self.to_crawl.extend(self.fetch_rss(&info).await);
+
+            // Fetch links from sitemap
             if let Some(robot) = &info.robot {
                 if !robot.sitemaps.is_empty() {
                     for sitemap in &robot.sitemaps {
@@ -465,7 +498,7 @@ mod test {
     use tracing_log::LogTracer;
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    use crate::{validator::validate_lens, Netrunner};
+    use crate::{validator::validate_lens, Netrunner, site::SiteInfo};
 
     #[tokio::test]
     async fn test_crawl() {
@@ -494,5 +527,20 @@ mod test {
             eprintln!("Failed validation: {}", err);
             panic!("Failed");
         }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_rss() {
+        let lens = LensConfig {
+            author: "test".to_string(),
+            name: "test".to_string(),
+            domains: vec!["atp.fm".to_string()],
+            ..Default::default()
+        };
+
+        let netrunner = Netrunner::new(lens);
+        let info = SiteInfo::new("atp.fm").await.expect("unable to create siteinfo");
+        let feed_urls = netrunner.fetch_rss(&info).await;
+        assert_eq!(feed_urls.len(), 515);
     }
 }
