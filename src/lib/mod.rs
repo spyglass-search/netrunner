@@ -26,13 +26,13 @@ use tokio_retry::Retry;
 use url::Url;
 
 pub mod archive;
+mod cache;
 mod cdx;
-mod robots;
 pub mod site;
 pub mod validator;
 
 use archive::{ArchiveRecord, Archiver};
-use robots::Robots;
+use cache::CrawlCache;
 
 use crate::cdx::create_archive_url;
 
@@ -120,8 +120,8 @@ async fn fetch_page(
 }
 
 #[derive(Clone)]
-struct NetrunnerState {
-    has_urls: bool,
+pub struct NetrunnerState {
+    pub has_urls: bool,
 }
 
 #[derive(Clone)]
@@ -134,7 +134,7 @@ pub struct Netrunner {
     to_crawl: HashSet<String>,
     // Where the cached web archive will be storage
     pub storage: PathBuf,
-    state: NetrunnerState,
+    pub state: NetrunnerState,
 }
 
 impl Netrunner {
@@ -161,7 +161,7 @@ impl Netrunner {
 
     /// Kick off a crawl for URLs represented by <lens>.
     pub async fn crawl(&mut self, print_urls: bool, create_crawl_archive: bool) -> Result<()> {
-        let mut robots = Robots::new();
+        let mut cache = CrawlCache::new();
         // ------------------------------------------------------------------------
         // First, build filters based on the lens. This will be used to filter out
         // urls from sitemaps / cdx indexes
@@ -181,7 +181,7 @@ impl Netrunner {
         log::info!("Fetching robots.txt & sitemaps.xml");
         for domain in self.lens.domains.iter() {
             let domain_url = format!("http://{}", domain);
-            if !robots.process_url(&domain_url).await {
+            if !cache.process_url(&domain_url).await {
                 self.cdx_queue.insert(domain_url);
             }
         }
@@ -197,7 +197,7 @@ impl Netrunner {
             };
 
             // If there is no sitemaps in the robots, add to CDX queue
-            if !robots.process_url(url).await {
+            if !cache.process_url(url).await {
                 self.cdx_queue.insert(url.to_owned());
             }
         }
@@ -207,7 +207,7 @@ impl Netrunner {
         // urls to crawl.
         // ------------------------------------------------------------------------
         if !self.state.has_urls {
-            self.fetch_urls(&robots, &allowed, &skipped).await;
+            self.fetch_urls(&cache, &allowed, &skipped).await;
         } else {
             log::info!("Already collected URLs, skipping");
             // Load urls from file
@@ -400,13 +400,15 @@ impl Netrunner {
         urls
     }
 
-    pub async fn fetch_urls(&mut self, robots: &Robots, allowed: &RegexSet, skipped: &RegexSet) {
+    pub async fn fetch_urls(&mut self, cache: &CrawlCache, allowed: &RegexSet, skipped: &RegexSet) {
         // Crawl sitemaps
-        for robot in robots.cache.values().flatten() {
-            if !robot.sitemaps.is_empty() {
-                for sitemap in &robot.sitemaps {
-                    self.to_crawl
-                        .extend(self.fetch_sitemap(robot, sitemap, allowed, skipped).await);
+        for info in cache.cache.values().flatten() {
+            if let Some(robot) = &info.robot {
+                if !robot.sitemaps.is_empty() {
+                    for sitemap in &robot.sitemaps {
+                        self.to_crawl
+                            .extend(self.fetch_sitemap(robot, sitemap, allowed, skipped).await);
+                    }
                 }
             }
         }

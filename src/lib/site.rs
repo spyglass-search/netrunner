@@ -1,4 +1,4 @@
-use crate::robots::read_robots;
+use crate::cache::read_robots;
 use feedfinder::{detect_feeds, Feed};
 use texting_robots::{get_robots_url, Robot};
 use url::Url;
@@ -13,7 +13,11 @@ pub struct SiteInfo {
 
 impl SiteInfo {
     pub async fn new(domain: &str) -> anyhow::Result<Self> {
-        let domain_url = format!("http://{}", domain);
+        let domain_url = if domain.starts_with("http") {
+            domain.to_string()
+        } else {
+            format!("http://{}", domain)
+        };
 
         let mut feeds = Vec::new();
         let url = Url::parse(&domain_url)?;

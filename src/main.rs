@@ -101,7 +101,9 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
             // Remove previous urls.txt if any
             if netrunner.url_txt_path().exists() {
                 let _ = std::fs::remove_file(netrunner.url_txt_path());
+                netrunner.state.has_urls = false;
             }
+
             netrunner.crawl(true, false).await
         }
         Commands::Clean => {
