@@ -1,39 +1,43 @@
 use anyhow::Result;
 use std::collections::HashMap;
-use texting_robots::{get_robots_url, Robot};
+use texting_robots::Robot;
+use url::Url;
 
 use super::{http_client, APP_USER_AGENT};
+use crate::site::SiteInfo;
 
 #[derive(Default)]
-pub struct Robots {
-    pub cache: HashMap<String, Option<Robot>>,
+pub struct CrawlCache {
+    pub cache: HashMap<String, Option<SiteInfo>>,
 }
 
 type HasSitemap = bool;
 
-impl Robots {
+impl CrawlCache {
     pub fn new() -> Self {
         Default::default()
     }
 
     pub async fn process_url(&mut self, url: &str) -> HasSitemap {
-        if let Ok(robots_txt_url) = get_robots_url(url) {
-            if self.cache.contains_key(&robots_txt_url) {
-                let res = self.cache.get(&robots_txt_url).expect("check");
-                return match res {
+        if let Ok(base) = Url::parse(url).and_then(|url| url.join("/")) {
+            let base_url = base.to_string();
+
+            if self.cache.contains_key(&base_url) {
+                return match self.cache.get(&base_url).expect("check") {
                     Some(robot) => !robot.sitemaps.is_empty(),
                     None => false,
                 };
             }
 
-            if let Ok(robot) = read_robots(&robots_txt_url).await {
-                let has_sitemap = match &robot {
-                    Some(robot) => !robot.sitemaps.is_empty(),
-                    None => false,
-                };
-
-                self.cache.insert(robots_txt_url, robot);
-                return has_sitemap;
+            match SiteInfo::new(&base_url).await {
+                Ok(info) => {
+                    let has_sitemap = info.sitemaps.is_empty();
+                    self.cache.insert(base_url, Some(info));
+                    return has_sitemap;
+                }
+                Err(_) => {
+                    self.cache.insert(base_url, None);
+                }
             }
         }
 
