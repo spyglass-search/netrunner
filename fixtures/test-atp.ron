@@ -1,0 +1,8 @@
+(
+    version: "1",
+    name: "test_atp",
+    author: "spyglass",
+    description: Some("Spyglass Test Lens"),
+    domains: ["atp.fm"],
+    urls: []
+)

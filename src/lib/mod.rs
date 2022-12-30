@@ -232,7 +232,7 @@ impl Netrunner {
         if create_crawl_archive {
             // CRAWL BABY CRAWL
             // Default to max 2 requests per second for a domain.
-            let quota = Quota::per_second(nonzero!(5u32));
+            let quota = Quota::per_second(nonzero!(2u32));
             self.crawl_loop(tmp_storage_path(&self.lens), quota).await?;
         }
 
@@ -363,7 +363,7 @@ impl Netrunner {
                             }
                         }
                     }
-                },
+                }
                 _ => {}
             }
         }
@@ -433,7 +433,7 @@ impl Netrunner {
         // Crawl sitemaps & rss feeds
         for info in cache.cache.values().flatten() {
             // Fetch links from RSS feeds
-            self.to_crawl.extend(self.fetch_rss(&info).await);
+            self.to_crawl.extend(self.fetch_rss(info).await);
 
             // Fetch links from sitemap
             if let Some(robot) = &info.robot {
@@ -498,7 +498,7 @@ mod test {
     use tracing_log::LogTracer;
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    use crate::{validator::validate_lens, Netrunner, site::SiteInfo};
+    use crate::{site::SiteInfo, validator::validate_lens, Netrunner};
 
     #[tokio::test]
     async fn test_crawl() {
@@ -530,6 +530,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_rss() {
         let lens = LensConfig {
             author: "test".to_string(),
@@ -539,7 +540,9 @@ mod test {
         };
 
         let netrunner = Netrunner::new(lens);
-        let info = SiteInfo::new("atp.fm").await.expect("unable to create siteinfo");
+        let info = SiteInfo::new("atp.fm")
+            .await
+            .expect("unable to create siteinfo");
         let feed_urls = netrunner.fetch_rss(&info).await;
         assert_eq!(feed_urls.len(), 515);
     }
