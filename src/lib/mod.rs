@@ -42,6 +42,12 @@ use crate::cdx::create_archive_url;
 static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"));
 const RETRY_DELAY_MS: u64 = 5000;
 
+#[derive(Default)]
+pub struct CrawlOpts {
+    pub print_urls: bool,
+    pub create_warc: bool,
+}
+
 fn http_client() -> Client {
     // Use a normal user-agent otherwise some sites won't let us crawl
     reqwest::Client::builder()
@@ -163,7 +169,7 @@ impl Netrunner {
     }
 
     /// Kick off a crawl for URLs represented by <lens>.
-    pub async fn crawl(&mut self, print_urls: bool, create_crawl_archive: bool) -> Result<()> {
+    pub async fn crawl(&mut self, opts: CrawlOpts) -> Result<()> {
         let mut cache = CrawlCache::new();
         // ------------------------------------------------------------------------
         // First, build filters based on the lens. This will be used to filter out
@@ -220,7 +226,7 @@ impl Netrunner {
                 .extend(file.lines().map(|x| x.to_string()).collect::<Vec<String>>());
         }
 
-        if print_urls {
+        if opts.print_urls {
             let mut sorted_urls = self.to_crawl.clone().into_iter().collect::<Vec<String>>();
             sorted_urls.sort();
             for url in &sorted_urls {
@@ -229,7 +235,7 @@ impl Netrunner {
             log::info!("Discovered {} urls for lens", sorted_urls.len());
         }
 
-        if create_crawl_archive {
+        if opts.create_warc {
             // CRAWL BABY CRAWL
             // Default to max 2 requests per second for a domain.
             let quota = Quota::per_second(nonzero!(2u32));

@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use libnetrunner::CrawlOpts;
 use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
@@ -104,7 +105,12 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                 netrunner.state.has_urls = false;
             }
 
-            netrunner.crawl(true, false).await
+            netrunner
+                .crawl(CrawlOpts {
+                    print_urls: true,
+                    create_warc: false,
+                })
+                .await
         }
         Commands::Clean => {
             log::info!("Cleaning up temp directories/files");
@@ -118,7 +124,12 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
         Commands::Crawl => {
             let lens = _parse_lens(cli).await?;
             let mut netrunner = Netrunner::new(lens);
-            netrunner.crawl(false, true).await
+            netrunner
+                .crawl(CrawlOpts {
+                    print_urls: false,
+                    create_warc: true,
+                })
+                .await;
         }
         Commands::Validate => {
             let lens = _parse_lens(cli).await?;
