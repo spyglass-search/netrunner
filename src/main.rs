@@ -1,9 +1,11 @@
 use clap::{Parser, Subcommand};
 use libnetrunner::CrawlOpts;
+use rusoto_core::Region;
+use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
+use spyglass_lens::LensConfig;
+use tokio::io::AsyncReadExt;
 use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
-
-use spyglass_lens::LensConfig;
 
 use std::io;
 use std::path::Path;
@@ -26,6 +28,9 @@ struct Cli {
     /// Lens file
     #[clap(short, long, value_parser, value_name = "FILE")]
     lens_file: Option<String>,
+    /// Upload finished archive to S3.
+    #[clap(short, long, value_parser, value_name = "S3_BUCKET_NAME")]
+    s3_bucket: Option<String>,
     #[clap(subcommand)]
     command: Commands,
 }
@@ -110,7 +115,9 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                     print_urls: true,
                     create_warc: false,
                 })
-                .await
+                .await?;
+
+            Ok(())
         }
         Commands::Clean => {
             log::info!("Cleaning up temp directories/files");
@@ -123,13 +130,35 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
         }
         Commands::Crawl => {
             let lens = _parse_lens(cli).await?;
-            let mut netrunner = Netrunner::new(lens);
-            netrunner
+            let mut netrunner = Netrunner::new(lens.clone());
+
+            let archive_path = netrunner
                 .crawl(CrawlOpts {
                     print_urls: false,
                     create_warc: true,
                 })
-                .await;
+                .await?;
+
+            if let (Some(archive_path), Some(s3_bucket)) = (archive_path, &cli.s3_bucket) {
+                let key = format!("{}/archive.warc.gz", &lens.name);
+
+                log::info!("uploading to bucket: {}, key: {}", s3_bucket, key);
+                let client = S3Client::new(Region::UsEast1);
+                let mut file = tokio::fs::File::open(archive_path).await?;
+                let mut buffer = Vec::new();
+                file.read_to_end(&mut buffer).await?;
+
+                let _ = client
+                    .put_object(PutObjectRequest {
+                        bucket: s3_bucket.into(),
+                        key,
+                        body: Some(StreamingBody::from(buffer)),
+                        ..Default::default()
+                    })
+                    .await?;
+            }
+
+            Ok(())
         }
         Commands::Validate => {
             let lens = _parse_lens(cli).await?;

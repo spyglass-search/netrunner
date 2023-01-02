@@ -169,7 +169,7 @@ impl Netrunner {
     }
 
     /// Kick off a crawl for URLs represented by <lens>.
-    pub async fn crawl(&mut self, opts: CrawlOpts) -> Result<()> {
+    pub async fn crawl(&mut self, opts: CrawlOpts) -> Result<Option<PathBuf>> {
         let mut cache = CrawlCache::new();
         // ------------------------------------------------------------------------
         // First, build filters based on the lens. This will be used to filter out
@@ -239,10 +239,11 @@ impl Netrunner {
             // CRAWL BABY CRAWL
             // Default to max 2 requests per second for a domain.
             let quota = Quota::per_second(nonzero!(2u32));
-            self.crawl_loop(tmp_storage_path(&self.lens), quota).await?;
+            let archive_path = self.crawl_loop(tmp_storage_path(&self.lens), quota).await?;
+            return Ok(Some(archive_path));
         }
 
-        Ok(())
+        Ok(None)
     }
 
     fn cached_records(&self, tmp_storage: &PathBuf) -> Vec<ArchiveRecord> {
@@ -261,7 +262,7 @@ impl Netrunner {
     }
 
     /// Web Archive (WARC) file format definition: https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1
-    async fn crawl_loop(&mut self, tmp_storage: PathBuf, quota: Quota) -> anyhow::Result<()> {
+    async fn crawl_loop(&mut self, tmp_storage: PathBuf, quota: Quota) -> anyhow::Result<PathBuf> {
         let mut archiver = Archiver::new(&self.storage).expect("Unable to create archiver");
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
 
@@ -346,10 +347,10 @@ impl Netrunner {
             }
         }
 
-        archiver.finish()?;
+        let archive_file = archiver.finish()?;
         log::info!("Finished crawl");
 
-        Ok(())
+        Ok(archive_file)
     }
 
     async fn fetch_rss(&self, info: &SiteInfo) -> Vec<String> {
@@ -504,7 +505,7 @@ mod test {
     use tracing_log::LogTracer;
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    use crate::{site::SiteInfo, validator::validate_lens, Netrunner};
+    use crate::{site::SiteInfo, validator::validate_lens, CrawlOpts, Netrunner};
 
     #[tokio::test]
     async fn test_crawl() {
@@ -526,7 +527,13 @@ mod test {
 
         // Test crawling logic
         let mut netrunner = Netrunner::new(lens.clone());
-        netrunner.crawl(false, true).await.expect("Unable to crawl");
+        netrunner
+            .crawl(CrawlOpts {
+                print_urls: true,
+                create_warc: false,
+            })
+            .await
+            .expect("Unable to crawl");
 
         // Test validation logic
         if let Err(err) = validate_lens(&lens) {

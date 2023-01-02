@@ -2020,6 +2020,7 @@ dependencies = [
  "reqwest",
  "ron",
  "rss",
+ "rusoto_core",
  "rusoto_s3",
  "serde",
  "sitemap",
