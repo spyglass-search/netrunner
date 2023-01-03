@@ -42,6 +42,12 @@ use crate::cdx::create_archive_url;
 static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"));
 const RETRY_DELAY_MS: u64 = 5000;
 
+#[derive(Default)]
+pub struct CrawlOpts {
+    pub print_urls: bool,
+    pub create_warc: bool,
+}
+
 fn http_client() -> Client {
     // Use a normal user-agent otherwise some sites won't let us crawl
     reqwest::Client::builder()
@@ -163,7 +169,7 @@ impl Netrunner {
     }
 
     /// Kick off a crawl for URLs represented by <lens>.
-    pub async fn crawl(&mut self, print_urls: bool, create_crawl_archive: bool) -> Result<()> {
+    pub async fn crawl(&mut self, opts: CrawlOpts) -> Result<Option<PathBuf>> {
         let mut cache = CrawlCache::new();
         // ------------------------------------------------------------------------
         // First, build filters based on the lens. This will be used to filter out
@@ -220,7 +226,7 @@ impl Netrunner {
                 .extend(file.lines().map(|x| x.to_string()).collect::<Vec<String>>());
         }
 
-        if print_urls {
+        if opts.print_urls {
             let mut sorted_urls = self.to_crawl.clone().into_iter().collect::<Vec<String>>();
             sorted_urls.sort();
             for url in &sorted_urls {
@@ -229,14 +235,15 @@ impl Netrunner {
             log::info!("Discovered {} urls for lens", sorted_urls.len());
         }
 
-        if create_crawl_archive {
+        if opts.create_warc {
             // CRAWL BABY CRAWL
             // Default to max 2 requests per second for a domain.
             let quota = Quota::per_second(nonzero!(2u32));
-            self.crawl_loop(tmp_storage_path(&self.lens), quota).await?;
+            let archive_path = self.crawl_loop(tmp_storage_path(&self.lens), quota).await?;
+            return Ok(Some(archive_path));
         }
 
-        Ok(())
+        Ok(None)
     }
 
     fn cached_records(&self, tmp_storage: &PathBuf) -> Vec<ArchiveRecord> {
@@ -255,7 +262,7 @@ impl Netrunner {
     }
 
     /// Web Archive (WARC) file format definition: https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1
-    async fn crawl_loop(&mut self, tmp_storage: PathBuf, quota: Quota) -> anyhow::Result<()> {
+    async fn crawl_loop(&mut self, tmp_storage: PathBuf, quota: Quota) -> anyhow::Result<PathBuf> {
         let mut archiver = Archiver::new(&self.storage).expect("Unable to create archiver");
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
 
@@ -340,10 +347,10 @@ impl Netrunner {
             }
         }
 
-        archiver.finish()?;
+        let archive_file = archiver.finish()?;
         log::info!("Finished crawl");
 
-        Ok(())
+        Ok(archive_file)
     }
 
     async fn fetch_rss(&self, info: &SiteInfo) -> Vec<String> {
@@ -498,7 +505,7 @@ mod test {
     use tracing_log::LogTracer;
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    use crate::{site::SiteInfo, validator::validate_lens, Netrunner};
+    use crate::{site::SiteInfo, validator::validate_lens, CrawlOpts, Netrunner};
 
     #[tokio::test]
     async fn test_crawl() {
@@ -520,7 +527,13 @@ mod test {
 
         // Test crawling logic
         let mut netrunner = Netrunner::new(lens.clone());
-        netrunner.crawl(false, true).await.expect("Unable to crawl");
+        netrunner
+            .crawl(CrawlOpts {
+                print_urls: false,
+                create_warc: true,
+            })
+            .await
+            .expect("Unable to crawl");
 
         // Test validation logic
         if let Err(err) = validate_lens(&lens) {

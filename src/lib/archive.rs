@@ -129,7 +129,7 @@ impl Archiver {
         Ok(records)
     }
 
-    pub fn finish(self) -> anyhow::Result<()> {
+    pub fn finish(self) -> anyhow::Result<PathBuf> {
         use std::io::Write;
         // Make sure our buffer has been flushed to the filesystem.
         if let Ok(mut inner_writer) = self.writer.into_inner() {
@@ -167,7 +167,7 @@ impl Archiver {
             compresion_percentage
         );
 
-        Ok(())
+        Ok(compressed.clone())
     }
 
     pub fn generate_header(url: &str, content_length: usize) -> RawRecordHeader {
