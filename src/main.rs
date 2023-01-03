@@ -1,3 +1,4 @@
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use libnetrunner::CrawlOpts;
 use rusoto_core::Region;
@@ -140,7 +141,8 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                 .await?;
 
             if let (Some(archive_path), Some(s3_bucket)) = (archive_path, &cli.s3_bucket) {
-                let key = format!("{}/archive.warc.gz", &lens.name);
+                let now = Utc::now();
+                let key = format!("{}/{}/archive.warc.gz", now.format("%Y-%m-%d"), &lens.name);
 
                 log::info!("uploading to bucket: {}, key: {}", s3_bucket, key);
                 let client = S3Client::new(Region::UsEast1);
