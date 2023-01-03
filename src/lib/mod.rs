@@ -529,8 +529,8 @@ mod test {
         let mut netrunner = Netrunner::new(lens.clone());
         netrunner
             .crawl(CrawlOpts {
-                print_urls: true,
-                create_warc: false,
+                print_urls: false,
+                create_warc: true,
             })
             .await
             .expect("Unable to crawl");
