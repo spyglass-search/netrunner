@@ -29,29 +29,35 @@ cargo install --path .
 ## Running the CLI
 
 ```
-netrunner 0.1.2
+netrunner 0.1.4
 Andrew Huynh <andrew@spyglass.fyi>
 A small CLI utility to help build lenses for spyglass
 
-USAGE:
-    netrunner [OPTIONS] <SUBCOMMAND>
+Usage: netrunner [OPTIONS] <COMMAND>
 
-OPTIONS:
-    -h, --help                Print help information
-    -l, --lens-file <FILE>    Lens file (./example.ron or https://example.com/lens.ron)
-    -V, --version             Print version information
+Commands:
+  check-domain  Print out useful information about a domain, such as whether there is an rss feed, an robots.txt, and a sitemap
+  check-urls    Grabs all the URLs represented by <lens-file> for review
+  clean         Removes temporary directories/files
+  crawl         Crawls & creates a web archive for the pages represented by <lens-file>
+  validate      Validate the lens file and, if available, the cached web archive for <lens-file>
+  help          Print this message or the help of the given subcommand(s)
 
-SUBCOMMANDS:
-    check-urls    Grabs all the URLs represented by <lens-file> for review
-    clean         Removes temporary directories/files
-    crawl         Crawls & creates a web archive for the pages represented by <lens-file>
-    help          Print this message or the help of the given subcommand(s)
-    validate      Validate the lens file and, if available, the cached web archive for
-                      <lens-file>
+Options:
+  -l, --lens-file <FILE>            Lens file
+  -s, --s3-bucket <S3_BUCKET_NAME>  Upload finished archive to S3
+  -h, --help                        Print help information
+  -V, --version                     Print version information
 ```
 
 
 ## Commands in depth
+
+### `check-domain`
+This will run through a couple checks for a particular domain, pulling out URL paths
+(if available) to `robots.txt`, `sitemap.xml`, and any RSS feeds for the domain. This
+data is used in the `check-urls` and `crawl` commands to create the WARC for a particular
+lens.
 
 ### `check-urls`
 This command will grab all the urls represented by this lens. This will be gathered
