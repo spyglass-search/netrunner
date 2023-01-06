@@ -31,6 +31,7 @@ use url::Url;
 pub mod archive;
 mod cache;
 mod cdx;
+pub mod parser;
 pub mod site;
 pub mod validator;
 
@@ -316,6 +317,8 @@ impl Netrunner {
                     })
                     .await;
 
+                    // If we fail trying to get the page from the web archive, hit the
+                    // site directly.
                     if web_archive.is_err() {
                         let _ = Retry::spawn(retry_strat, || async {
                             // Wait for when we can crawl this based on the domain
