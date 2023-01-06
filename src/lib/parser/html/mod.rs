@@ -3,11 +3,11 @@ use html5ever::{local_name, namespace_url, ns, QualName};
 use std::collections::HashSet;
 use url::Url;
 
-mod element;
-mod html;
-use element::Node;
-use html::Html;
+mod element_node;
+mod html_node;
 use crate::parser::ParseResult;
+use element_node::Node;
+use html_node::Html;
 
 pub const DEFAULT_DESC_LENGTH: usize = 256;
 

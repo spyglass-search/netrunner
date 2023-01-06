@@ -11,7 +11,7 @@ use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
 use html5ever::{expanded_name, local_name, namespace_url, ns, Attribute, ExpandedName, QualName};
 use tendril::TendrilSink;
 
-use super::element::{Comment, Doctype, Element, Node, ProcessingInstruction, Text};
+use super::element_node::{Comment, Doctype, Element, Node, ProcessingInstruction, Text};
 
 pub struct Html {
     pub errors: Vec<String>,
