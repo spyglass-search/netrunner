@@ -207,8 +207,39 @@ pub fn html_to_text(url: &str, doc: &str) -> ParseResult {
 
 #[cfg(test)]
 mod test {
-    use super::html_to_text;
+    use super::{html_to_text, normalize_href};
     use std::time::SystemTime;
+
+    #[test]
+    fn test_normalize_href() {
+        let url = "https://example.com";
+
+        assert_eq!(
+            normalize_href(&url, "http://foo.com"),
+            Some("https://foo.com/".into())
+        );
+        assert_eq!(
+            normalize_href(&url, "https://foo.com"),
+            Some("https://foo.com/".into())
+        );
+        assert_eq!(
+            normalize_href(&url, "//foo.com"),
+            Some("https://foo.com/".into())
+        );
+        assert_eq!(
+            normalize_href(&url, "/foo.html"),
+            Some("https://example.com/foo.html".into())
+        );
+        assert_eq!(
+            normalize_href(&url, "/foo"),
+            Some("https://example.com/foo".into())
+        );
+        assert_eq!(
+            normalize_href(&url, "foo.html"),
+            Some("https://example.com/foo.html".into())
+        );
+    }
+
 
     #[test]
     fn test_html_to_text() {
@@ -218,6 +249,7 @@ mod test {
         assert_eq!(doc.meta.len(), 9);
         assert!(doc.content.len() > 0);
         assert_eq!(doc.links.len(), 58);
+        println!("{:?}", doc.links);
     }
 
     #[test]
