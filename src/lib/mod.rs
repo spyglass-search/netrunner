@@ -491,7 +491,7 @@ impl Netrunner {
 #[cfg(test)]
 mod test {
     use spyglass_lens::LensConfig;
-    use std::io::{self, BufRead};
+    use std::io;
     use std::path::Path;
     use tracing_log::LogTracer;
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
