@@ -140,7 +140,11 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                 let key = format!("{}/{}.gz", &lens.name, libnetrunner::archive::ARCHIVE_FILE);
                 libnetrunner::s3::upload_to_bucket(&archive_path.warc, s3_bucket, &key).await?;
 
-                let key = format!("{}/{}", &lens.name, libnetrunner::archive::PARSED_ARCHIVE_FILE);
+                let key = format!(
+                    "{}/{}",
+                    &lens.name,
+                    libnetrunner::archive::PARSED_ARCHIVE_FILE
+                );
                 libnetrunner::s3::upload_to_bucket(&archive_path.warc, s3_bucket, &key).await?;
             }
 

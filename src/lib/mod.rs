@@ -290,8 +290,9 @@ impl Netrunner {
 
         // Spin up tasks to crawl through everything
         let tasks: Vec<JoinHandle<()>> = to_crawl
+            .flat_map(|url| Url::parse(&url))
             .filter_map(|url| {
-                if already_crawled.contains(&url) {
+                if already_crawled.contains(&url.to_string()) {
                     log::info!("-> skipping {}, already crawled", url);
                     return None;
                 }
@@ -301,12 +302,10 @@ impl Netrunner {
                 let tmp_storage = tmp_storage.clone();
 
                 let res = tokio::spawn(async move {
-                    // OG url
-                    let parsed_url = Url::parse(&url).expect("Invalid URL");
                     // URL to Wayback Machine
-                    let ia_url = create_archive_url(parsed_url.as_ref());
+                    let ia_url = create_archive_url(url.as_ref());
 
-                    let domain = parsed_url.domain().expect("No domain in URL");
+                    let domain = url.domain().expect("No domain in URL");
                     let client = http_client();
 
                     let retry_strat = ExponentialBackoff::from_millis(100).take(3);
@@ -315,8 +314,7 @@ impl Netrunner {
                     let web_archive = Retry::spawn(retry_strat.clone(), || async {
                         // Wait for when we can crawl this based on the domain
                         lim.until_key_ready(&domain.to_string()).await;
-                        fetch_page(&client, &ia_url, Some(parsed_url.to_string()), &tmp_storage)
-                            .await
+                        fetch_page(&client, &ia_url, Some(url.to_string()), &tmp_storage).await
                     })
                     .await;
 
@@ -326,7 +324,7 @@ impl Netrunner {
                         let _ = Retry::spawn(retry_strat, || async {
                             // Wait for when we can crawl this based on the domain
                             lim.until_key_ready(&domain.to_string()).await;
-                            fetch_page(&client, parsed_url.as_ref(), None, &tmp_storage).await
+                            fetch_page(&client, url.as_ref(), None, &tmp_storage).await
                         })
                         .await;
                     }
