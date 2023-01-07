@@ -5,7 +5,7 @@ use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::runtime;
 
 use libnetrunner::validator::validate_lens;
@@ -43,6 +43,8 @@ enum Commands {
     Clean,
     /// Crawls & creates a web archive for the pages represented by <lens-file>
     Crawl,
+    /// Generate a preprocessed archive file from an archive.warc.gz file.
+    Preprocess { warc: PathBuf },
     /// Validate the lens file and, if available, the cached web archive for <lens-file>
     Validate,
 }
@@ -149,6 +151,14 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
             }
 
             Ok(())
+        }
+        Commands::Preprocess { warc } => {
+            if !warc.exists() {
+                log::error!("Path \"{}\" does not exist!", warc.display());
+                return Err(anyhow::anyhow!("Invalid warc path"));
+            }
+
+            libnetrunner::archive::preprocess_warc_archive(&warc)
         }
         Commands::Validate => {
             let lens = _parse_lens(cli).await?;

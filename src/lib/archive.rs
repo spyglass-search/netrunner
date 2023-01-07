@@ -6,7 +6,7 @@ use std::{
 };
 
 use chrono::prelude::*;
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
+use flate2::{write::GzEncoder, Compression};
 use reqwest::Response;
 use serde::{Deserialize, Serialize};
 use warc::{BufferedBody, RawRecordHeader, Record, RecordType, WarcHeader, WarcReader, WarcWriter};
@@ -95,19 +95,20 @@ impl Archiver {
     }
 
     pub fn read(path: &Path) -> anyhow::Result<Vec<ArchiveRecord>> {
-        let mut warc_path = path.join(ARCHIVE_FILE);
-        warc_path.set_extension("warc.gz");
+        let warc_path = if !path.ends_with(format!("{}.gz", ARCHIVE_FILE)) {
+            let mut warc_path = path.join(ARCHIVE_FILE);
+            warc_path.set_extension("warc.gz");
+            warc_path
+        } else {
+            path.to_path_buf()
+        };
+
         log::info!("Reading archive: {}", warc_path.display());
 
         // Unzip
-        let file = std::fs::read(&warc_path)?;
-        let mut d = GzDecoder::new(&file[..]);
-        let mut s = String::new();
-        d.read_to_string(&mut s)?;
-
+        let warc = WarcReader::from_path_gzip(&warc_path)?;
         let mut records = Vec::new();
-        let reader = WarcReader::new(s.as_bytes());
-        for record in reader.iter_records().flatten() {
+        for record in warc.iter_records().flatten() {
             let url = record
                 .header(WarcHeader::TargetURI)
                 .expect("TargetURI not set")
@@ -233,6 +234,34 @@ impl Archiver {
 pub struct ArchiveFiles {
     pub warc: PathBuf,
     pub parsed: PathBuf,
+}
+
+/// Create a preproprocessed archive from an existing WARC file
+pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<()> {
+    let parent_dir = warc.parent().expect("Unable to get parent folder");
+    log::info!("Saving preprocessed archive to: {}", parent_dir.display());
+
+    let warc = WarcReader::from_path_gzip(warc)?;
+    let path = parent_dir.join(PARSED_ARCHIVE_FILE);
+    let archive_path = std::fs::File::create(path.clone()).expect("Unable to create file");
+    let mut gz = GzEncoder::new(&archive_path, Compression::default());
+
+    let mut buffer = String::new();
+    for record in warc.iter_records().flatten() {
+        buffer.clear();
+        if let Ok(_) = record.body().read_to_string(&mut buffer) {
+            if let Some(url) = record.header(WarcHeader::TargetURI) {
+                let parsed = crate::parser::html::html_to_text(&url, &buffer);
+                let ser = ron::ser::to_string(&parsed).unwrap();
+                gz.write_fmt(format_args!("{}\n", ser))?;
+            }
+        }
+
+    }
+    gz.finish()?;
+    log::info!("Saved parsed results to: {}", path.display());
+
+    Ok(())
 }
 
 /// Creates gzipped archives for all the crawls & preprocessed crawl content.
