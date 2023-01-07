@@ -12,7 +12,7 @@ use anyhow::Result;
 use async_recursion::async_recursion;
 use bytes::buf::Buf;
 use feedfinder::FeedType;
-use flate2::bufread::GzDecoder;
+use flate2::read::GzDecoder;
 use futures::future;
 use governor::{Quota, RateLimiter};
 use nonzero_ext::nonzero;
@@ -35,7 +35,7 @@ pub mod parser;
 pub mod site;
 pub mod validator;
 
-use archive::{ArchiveRecord, Archiver};
+use archive::{create_archives, ArchiveFiles, ArchiveRecord};
 use cache::CrawlCache;
 
 use crate::cdx::create_archive_url;
@@ -170,7 +170,7 @@ impl Netrunner {
     }
 
     /// Kick off a crawl for URLs represented by <lens>.
-    pub async fn crawl(&mut self, opts: CrawlOpts) -> Result<Option<PathBuf>> {
+    pub async fn crawl(&mut self, opts: CrawlOpts) -> Result<Option<ArchiveFiles>> {
         let mut cache = CrawlCache::new();
         // ------------------------------------------------------------------------
         // First, build filters based on the lens. This will be used to filter out
@@ -240,8 +240,11 @@ impl Netrunner {
             // CRAWL BABY CRAWL
             // Default to max 2 requests per second for a domain.
             let quota = Quota::per_second(nonzero!(2u32));
-            let archive_path = self.crawl_loop(tmp_storage_path(&self.lens), quota).await?;
-            return Ok(Some(archive_path));
+            let tmp_storage = tmp_storage_path(&self.lens);
+            self.crawl_loop(&tmp_storage, quota).await?;
+            let archives =
+                create_archives(&self.storage, &self.cached_records(&tmp_storage)).await?;
+            return Ok(Some(archives));
         }
 
         Ok(None)
@@ -263,8 +266,7 @@ impl Netrunner {
     }
 
     /// Web Archive (WARC) file format definition: https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1
-    async fn crawl_loop(&mut self, tmp_storage: PathBuf, quota: Quota) -> anyhow::Result<PathBuf> {
-        let mut archiver = Archiver::new(&self.storage).expect("Unable to create archiver");
+    async fn crawl_loop(&mut self, tmp_storage: &PathBuf, quota: Quota) -> anyhow::Result<()> {
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
 
         let progress = Arc::new(AtomicUsize::new(0));
@@ -273,7 +275,7 @@ impl Netrunner {
         let mut already_crawled: HashSet<String> = HashSet::new();
 
         // Before we begin, check to see if we've already crawled anything
-        let recs = self.cached_records(&tmp_storage);
+        let recs = self.cached_records(tmp_storage);
         log::debug!("found {} crawls in cache", recs.len());
         for rec in recs {
             already_crawled.insert(rec.url);
@@ -338,22 +340,9 @@ impl Netrunner {
             })
             .collect();
 
-        // Archive responses
+        // Wait til we're finished crawling everything.
         let _ = future::join_all(tasks).await;
-
-        log::info!("Archiving responses");
-        let recs = self.cached_records(&tmp_storage);
-        for rec in recs {
-            // Only save successes to the archive
-            if rec.status >= 200 && rec.status <= 299 {
-                archiver.archive_record(&rec).await?;
-            }
-        }
-
-        let archive_file = archiver.finish()?;
-        log::info!("Finished crawl");
-
-        Ok(archive_file)
+        Ok(())
     }
 
     async fn fetch_rss(&self, info: &SiteInfo) -> Vec<String> {

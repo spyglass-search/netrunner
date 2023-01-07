@@ -1,19 +1,18 @@
-use std::fmt::Write;
-use std::io::{BufWriter, Read};
+use std::fmt::Write as FmtWrite;
+use std::io::{BufWriter, Read, Write};
 use std::{
     fs::File,
     path::{Path, PathBuf},
 };
 
 use chrono::prelude::*;
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use reqwest::Response;
 use serde::{Deserialize, Serialize};
 use warc::{BufferedBody, RawRecordHeader, Record, RecordType, WarcHeader, WarcReader, WarcWriter};
 
-const ARCHIVE_FILE: &str = "archive.warc";
+pub const ARCHIVE_FILE: &str = "archive.warc";
+pub const PARSED_ARCHIVE_FILE: &str = "parsed.gz";
 
 pub struct Archiver {
     path: PathBuf,
@@ -130,7 +129,6 @@ impl Archiver {
     }
 
     pub fn finish(self) -> anyhow::Result<PathBuf> {
-        use std::io::Write;
         // Make sure our buffer has been flushed to the filesystem.
         if let Ok(mut inner_writer) = self.writer.into_inner() {
             let _ = inner_writer.flush();
@@ -159,7 +157,7 @@ impl Archiver {
         let after = contents.len();
         let compresion_percentage = (before as f64 - after as f64) / before as f64 * 100.0;
         std::fs::write(compressed.clone(), contents)?;
-        log::debug!(
+        log::info!(
             "saved to: {} | {} -> {} bytes ({:0.2}%)",
             compressed.display(),
             file.len(),
@@ -230,4 +228,40 @@ impl Archiver {
         log::debug!("wrote {} bytes", bytes_written);
         Ok(bytes_written)
     }
+}
+
+pub struct ArchiveFiles {
+    pub warc: PathBuf,
+    pub parsed: PathBuf,
+}
+
+pub async fn create_archives(
+    storage: &Path,
+    records: &[ArchiveRecord],
+) -> anyhow::Result<ArchiveFiles> {
+    log::info!("Archiving responses & pre-processed");
+    let mut archiver = Archiver::new(storage).expect("Unable to create archiver");
+
+    let parsed_archive_path = storage.join(PARSED_ARCHIVE_FILE);
+    let parsed_archive =
+        std::fs::File::create(parsed_archive_path.clone()).expect("Unabel to create file");
+    let mut gz = GzEncoder::new(&parsed_archive, Compression::default());
+    for rec in records {
+        // Only save successes to the archive
+        if rec.status >= 200 && rec.status <= 299 {
+            let parsed = crate::parser::html::html_to_text(&rec.content);
+            let ser = ron::ser::to_string(&parsed).unwrap();
+            gz.write_fmt(format_args!("{}\n", ser))?;
+            archiver.archive_record(rec).await?;
+        }
+    }
+    gz.finish()?;
+    let archive_file = archiver.finish()?;
+    log::info!("Saved parsed results to: {}", parsed_archive_path.display());
+    log::info!("Finished crawl");
+
+    Ok(ArchiveFiles {
+        warc: archive_file,
+        parsed: parsed_archive_path,
+    })
 }

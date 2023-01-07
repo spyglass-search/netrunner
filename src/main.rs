@@ -144,7 +144,7 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
 
                 log::info!("uploading to bucket: {}, key: {}", s3_bucket, key);
                 let client = S3Client::new(Region::UsEast1);
-                let mut file = tokio::fs::File::open(archive_path).await?;
+                let mut file = tokio::fs::File::open(archive_path.warc).await?;
                 let mut buffer = Vec::new();
                 file.read_to_end(&mut buffer).await?;
 
