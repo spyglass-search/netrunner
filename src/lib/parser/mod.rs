@@ -20,6 +20,7 @@ pub struct ParseResult {
     /// Page description, extracted from meta tags or summarized from the actual content
     pub description: String,
     /// Links found in the page.
+    #[serde(skip)]
     pub links: HashSet<String>,
     /// Meta (OpenGraph, etc) tags associated w/ this content.
     pub meta: HashMap<String, String>,
@@ -46,6 +47,8 @@ pub struct ParseResultGzIterator {
     buffer: String,
 }
 
+/// Utility iterator that reads in lines from a gzipped archive of serialized
+/// ParseResults
 impl ParseResultGzIterator {
     pub fn new(reader: GzBufReader) -> Self {
         Self {

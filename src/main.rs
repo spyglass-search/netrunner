@@ -145,7 +145,7 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                     &lens.name,
                     libnetrunner::archive::PARSED_ARCHIVE_FILE
                 );
-                libnetrunner::s3::upload_to_bucket(&archive_path.warc, s3_bucket, &key).await?;
+                libnetrunner::s3::upload_to_bucket(&archive_path.parsed, s3_bucket, &key).await?;
             }
 
             Ok(())

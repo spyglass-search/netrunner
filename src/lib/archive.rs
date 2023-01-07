@@ -235,6 +235,7 @@ pub struct ArchiveFiles {
     pub parsed: PathBuf,
 }
 
+/// Creates gzipped archives for all the crawls & preprocessed crawl content.
 pub async fn create_archives(
     storage: &Path,
     records: &[ArchiveRecord],
@@ -244,7 +245,7 @@ pub async fn create_archives(
 
     let parsed_archive_path = storage.join(PARSED_ARCHIVE_FILE);
     let parsed_archive =
-        std::fs::File::create(parsed_archive_path.clone()).expect("Unabel to create file");
+        std::fs::File::create(parsed_archive_path.clone()).expect("Unable to create file");
     let mut gz = GzEncoder::new(&parsed_archive, Compression::default());
     for rec in records {
         // Only save successes to the archive
