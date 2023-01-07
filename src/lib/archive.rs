@@ -249,10 +249,7 @@ pub async fn create_archives(
     for rec in records {
         // Only save successes to the archive
         if rec.status >= 200 && rec.status <= 299 {
-            let parsed = crate::parser::html::html_to_text(
-                    &rec.url,
-                &rec.content
-            );
+            let parsed = crate::parser::html::html_to_text(&rec.url, &rec.content);
             let ser = ron::ser::to_string(&parsed).unwrap();
             gz.write_fmt(format_args!("{}\n", ser))?;
             archiver.archive_record(rec).await?;

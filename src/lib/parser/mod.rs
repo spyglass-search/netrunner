@@ -1,6 +1,10 @@
 use blake2::{Blake2s256, Digest};
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 
 pub mod html;
 
@@ -26,6 +30,48 @@ pub struct ParseResult {
 impl ParseResult {
     pub fn builder() -> ParseResultBuilder {
         ParseResultBuilder::new()
+    }
+
+    pub fn iter_from_gz(file: &Path) -> anyhow::Result<ParseResultGzIterator> {
+        let file = File::open(file)?;
+        Ok(ParseResultGzIterator::new(BufReader::new(GzDecoder::new(
+            file,
+        ))))
+    }
+}
+
+type GzBufReader = BufReader<GzDecoder<File>>;
+pub struct ParseResultGzIterator {
+    reader: GzBufReader,
+    buffer: String,
+}
+
+impl ParseResultGzIterator {
+    pub fn new(reader: GzBufReader) -> Self {
+        Self {
+            reader,
+            buffer: String::new(),
+        }
+    }
+}
+
+impl Iterator for ParseResultGzIterator {
+    type Item = ParseResult;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.buffer.clear();
+        if let Ok(read) = self.reader.read_line(&mut self.buffer) {
+            if read == 0 {
+                return None;
+            }
+
+            if let Ok(res) = ron::de::from_str::<ParseResult>(&self.buffer) {
+                Some(res)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 

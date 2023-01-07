@@ -491,12 +491,14 @@ impl Netrunner {
 #[cfg(test)]
 mod test {
     use spyglass_lens::LensConfig;
-    use std::io;
+    use std::io::{self, BufRead};
     use std::path::Path;
     use tracing_log::LogTracer;
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    use crate::{site::SiteInfo, validator::validate_lens, CrawlOpts, Netrunner};
+    use crate::{
+        parser::ParseResult, site::SiteInfo, validator::validate_lens, CrawlOpts, Netrunner,
+    };
 
     #[tokio::test]
     async fn test_crawl() {
@@ -518,13 +520,24 @@ mod test {
 
         // Test crawling logic
         let mut netrunner = Netrunner::new(lens.clone());
-        netrunner
+        let archives = netrunner
             .crawl(CrawlOpts {
                 print_urls: false,
                 create_warc: true,
             })
             .await
             .expect("Unable to crawl");
+
+        // Validate archives created are readable.
+        if let Some(archives) = archives {
+            assert!(archives.warc.exists());
+            assert!(archives.parsed.exists());
+
+            let reader =
+                ParseResult::iter_from_gz(&archives.parsed).expect("Unable to read parsed archive");
+
+            assert_eq!(reader.count(), 1);
+        }
 
         // Test validation logic
         if let Err(err) = validate_lens(&lens) {

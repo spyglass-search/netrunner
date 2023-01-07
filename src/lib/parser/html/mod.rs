@@ -151,7 +151,8 @@ pub fn html_to_text(url: &str, doc: &str) -> ParseResult {
     // Trim extra spaces from content
     content = content.trim().to_string();
     // Normalize links
-    links = links.into_iter()
+    links = links
+        .into_iter()
         .flat_map(|href| normalize_href(url, &href))
         .collect();
 
@@ -239,7 +240,6 @@ mod test {
             Some("https://example.com/foo.html".into())
         );
     }
-
 
     #[test]
     fn test_html_to_text() {
