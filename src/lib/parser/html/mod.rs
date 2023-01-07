@@ -11,6 +11,35 @@ use html_node::Html;
 
 pub const DEFAULT_DESC_LENGTH: usize = 256;
 
+fn normalize_href(url: &str, href: &str) -> Option<String> {
+    // Force HTTPS, crawler will fallback to HTTP if necessary.
+    if let Ok(url) = Url::parse(url) {
+        if href.starts_with("//") {
+            // schema relative url
+            if let Ok(url) = Url::parse(&format!("{}:{}", "https", href)) {
+                return Some(url.to_string());
+            }
+        } else if href.starts_with("http://") || href.starts_with("https://") {
+            // Force HTTPS, crawler will fallback to HTTP if necessary.
+            if let Ok(url) = Url::parse(href) {
+                let mut url = url;
+                if url.scheme() == "http" {
+                    url.set_scheme("https").expect("Unable to set HTTPS scheme");
+                }
+                return Some(url.to_string());
+            }
+        } else {
+            // origin or directory relative url
+            if let Ok(url) = url.join(href) {
+                return Some(url.to_string());
+            }
+        }
+    }
+
+    log::debug!("Unable to normalize href: {} - {}", url.to_string(), href);
+    None
+}
+
 /// Walk the DOM and grab all the p nodes
 fn filter_p_nodes(root: &NodeRef<Node>, p_list: &mut Vec<String>) {
     for child in root.children() {
@@ -108,7 +137,7 @@ fn filter_text_nodes(root: &NodeRef<Node>, doc: &mut String, links: &mut HashSet
 }
 
 /// Filters a DOM tree into a text document used for indexing
-pub fn html_to_text(doc: &str) -> ParseResult {
+pub fn html_to_text(url: &str, doc: &str) -> ParseResult {
     let parsed = Html::parse(doc);
     let root = parsed.tree.root();
     // Meta tags
@@ -119,7 +148,12 @@ pub fn html_to_text(doc: &str) -> ParseResult {
     let mut content = String::from("");
     let mut links = HashSet::new();
     filter_text_nodes(&root, &mut content, &mut links);
+    // Trim extra spaces from content
     content = content.trim().to_string();
+    // Normalize links
+    links = links.into_iter()
+        .flat_map(|href| normalize_href(url, &href))
+        .collect();
 
     let mut description = if meta.contains_key("description") {
         meta.get("description").unwrap().to_string()
@@ -179,7 +213,7 @@ mod test {
     #[test]
     fn test_html_to_text() {
         let html = include_str!("../../../../fixtures/html/raw.html");
-        let doc = html_to_text(html);
+        let doc = html_to_text("https://oldschool.runescape.wiki", html);
         assert_eq!(doc.title, Some("Old School RuneScape Wiki".to_string()));
         assert_eq!(doc.meta.len(), 9);
         assert!(doc.content.len() > 0);
@@ -190,7 +224,7 @@ mod test {
     fn test_html_to_text_large() {
         let start = SystemTime::now();
         let html = include_str!("../../../../fixtures/html/wikipedia_entry.html");
-        let doc = html_to_text(html);
+        let doc = html_to_text("https://example.com", html);
 
         let wall_time = start.elapsed().expect("elapsed");
         println!("wall_time: {}ms", wall_time.as_millis());
@@ -204,7 +238,7 @@ mod test {
     #[test]
     fn test_description_extraction() {
         let html = include_str!("../../../../fixtures/html/wikipedia_entry.html");
-        let doc = html_to_text(html);
+        let doc = html_to_text("https://example.com", html);
 
         assert_eq!(
             doc.title.unwrap(),
@@ -213,7 +247,7 @@ mod test {
         assert_eq!(doc.description, "Rust is a multi-paradigm, general-purpose programming language designed for performance and safety, especially safe concurrency. Rust is syntactically similar to C++, but can guarantee memory safety by using a borrow checker to validate references. Rust achieves memory safety without garbage collection, and reference counting is optional. Rust has been called a systems programming language, and in addition to high-level features such as functional programming it also offers mechanisms for low-level memory management.");
 
         let html = include_str!("../../../../fixtures/html/personal_blog.html");
-        let doc = html_to_text(html);
+        let doc = html_to_text("https://example.com", html);
         // ugh need to fix this
         assert_eq!(doc.description, "2020 July 15 - San Francisco |  855 words");
     }
@@ -221,7 +255,7 @@ mod test {
     #[test]
     fn test_description_extraction_yc() {
         let html = include_str!("../../../../fixtures/html/summary_test.html");
-        let doc = html_to_text(html);
+        let doc = html_to_text("https://example.com", html);
 
         assert_eq!(doc.title.unwrap(), "Why YC");
         assert_eq!(doc.description, "March 2006, rev August 2009 Yesterday one of the founders we funded asked me why we started Y Combinator.  Or more precisely, he asked if we'd started YC mainly for fun. Kind of, but not quite.  It is enormously fun to be able to work with Rtm and Trevor again.  I missed that after we sold Viaweb, and for all the years after I always had a background process running, looking for something we could do together.  There is definitely an aspect of a band reunion to Y Combinator.  Every couple days I slip and call it \"Viaweb.\" Viaweb we started very explicitly to make money.  I was sick of living from one freelance project to the next, and decided to just work as hard as I could till I'd made enough to solve the problem once and for all.  Viaweb was sometimes fun, but it wasn't designed for fun, and mostly it wasn't.  I'd be surprised if any startup is. All startups are mostly schleps. The real reason we started Y Combinator is neither selfish nor virtuous.  We didn't start it mainly to make money; we have no idea what our average returns might be, and won't know for years.  Nor did we start YC mainly to help out young would-be founders, though we do like the idea, and comfort ourselves occasionally with the thought that if all our investments tank, we will thus have been doing something unselfish.  (It's oddly nondeterministic.) The real");
