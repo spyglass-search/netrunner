@@ -253,7 +253,7 @@ pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<()> {
     let mut buffer = String::new();
     for record in warc.iter_records().flatten() {
         buffer.clear();
-        if let Ok(_) = record.body().read_to_string(&mut buffer) {
+        if record.body().read_to_string(&mut buffer).is_ok() {
             if let Some(url) = record.header(WarcHeader::TargetURI) {
                 let (_, content) = Archiver::parse_body(&buffer);
                 let parsed = crate::parser::html::html_to_text(&url, &content);
@@ -261,7 +261,6 @@ pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<()> {
                 gz.write_fmt(format_args!("{}\n", ser))?;
             }
         }
-
     }
     gz.finish()?;
     log::info!("Saved parsed results to: {}", path.display());

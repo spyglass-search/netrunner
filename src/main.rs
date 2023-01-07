@@ -158,7 +158,7 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                 return Err(anyhow::anyhow!("Invalid warc path"));
             }
 
-            libnetrunner::archive::preprocess_warc_archive(&warc)
+            libnetrunner::archive::preprocess_warc_archive(warc)
         }
         Commands::Validate => {
             let lens = _parse_lens(cli).await?;

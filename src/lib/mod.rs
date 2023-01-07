@@ -300,14 +300,12 @@ impl Netrunner {
                 let progress = progress.clone();
                 let lim = lim.clone();
                 let tmp_storage = tmp_storage.clone();
-
+                let client = http_client();
                 let res = tokio::spawn(async move {
                     // URL to Wayback Machine
                     let ia_url = create_archive_url(url.as_ref());
 
                     let domain = url.domain().expect("No domain in URL");
-                    let client = http_client();
-
                     let retry_strat = ExponentialBackoff::from_millis(100).take(3);
 
                     // Retry if we run into 429 / timeout errors
