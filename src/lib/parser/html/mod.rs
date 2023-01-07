@@ -121,14 +121,8 @@ fn filter_text_nodes(root: &NodeRef<Node>, doc: &mut String, links: &mut HashSet
 
             if child.has_children() {
                 filter_text_nodes(&child, doc, links);
-                // Add spacing to elements that naturally have spacing
-                if element.name().eq_ignore_ascii_case("p")
-                    || element.name().eq_ignore_ascii_case("h1")
-                    || element.name().eq_ignore_ascii_case("h2")
-                    || element.name().eq_ignore_ascii_case("h3")
-                    || element.name().eq_ignore_ascii_case("h4")
-                    || element.name().eq_ignore_ascii_case("h5")
-                {
+                // Add spacing after elements.
+                if !doc.ends_with(' ') {
                     doc.push(' ');
                 }
             }

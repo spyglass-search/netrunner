@@ -243,6 +243,10 @@ pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<()> {
 
     let warc = WarcReader::from_path_gzip(warc)?;
     let path = parent_dir.join(PARSED_ARCHIVE_FILE);
+    if path.exists() {
+        let _ = std::fs::remove_file(&path);
+    }
+
     let archive_path = std::fs::File::create(path.clone()).expect("Unable to create file");
     let mut gz = GzEncoder::new(&archive_path, Compression::default());
 
@@ -251,7 +255,8 @@ pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<()> {
         buffer.clear();
         if let Ok(_) = record.body().read_to_string(&mut buffer) {
             if let Some(url) = record.header(WarcHeader::TargetURI) {
-                let parsed = crate::parser::html::html_to_text(&url, &buffer);
+                let (_, content) = Archiver::parse_body(&buffer);
+                let parsed = crate::parser::html::html_to_text(&url, &content);
                 let ser = ron::ser::to_string(&parsed).unwrap();
                 gz.write_fmt(format_args!("{}\n", ser))?;
             }
