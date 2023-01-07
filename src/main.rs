@@ -1,9 +1,6 @@
 use clap::{Parser, Subcommand};
 use libnetrunner::CrawlOpts;
-use rusoto_core::Region;
-use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
 use spyglass_lens::LensConfig;
-use tokio::io::AsyncReadExt;
 use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
@@ -140,22 +137,11 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                 .await?;
 
             if let (Some(archive_path), Some(s3_bucket)) = (archive_path, &cli.s3_bucket) {
-                let key = format!("{}/archive.warc.gz", &lens.name);
+                let key = format!("{}/{}.gz", &lens.name, libnetrunner::archive::ARCHIVE_FILE);
+                libnetrunner::s3::upload_to_bucket(&archive_path.warc, s3_bucket, &key).await?;
 
-                log::info!("uploading to bucket: {}, key: {}", s3_bucket, key);
-                let client = S3Client::new(Region::UsEast1);
-                let mut file = tokio::fs::File::open(archive_path.warc).await?;
-                let mut buffer = Vec::new();
-                file.read_to_end(&mut buffer).await?;
-
-                let _ = client
-                    .put_object(PutObjectRequest {
-                        bucket: s3_bucket.into(),
-                        key,
-                        body: Some(StreamingBody::from(buffer)),
-                        ..Default::default()
-                    })
-                    .await?;
+                let key = format!("{}/{}", &lens.name, libnetrunner::archive::PARSED_ARCHIVE_FILE);
+                libnetrunner::s3::upload_to_bucket(&archive_path.warc, s3_bucket, &key).await?;
             }
 
             Ok(())

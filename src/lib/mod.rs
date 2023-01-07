@@ -32,6 +32,7 @@ pub mod archive;
 mod cache;
 mod cdx;
 pub mod parser;
+pub mod s3;
 pub mod site;
 pub mod validator;
 
