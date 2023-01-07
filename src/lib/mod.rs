@@ -12,7 +12,7 @@ use anyhow::Result;
 use async_recursion::async_recursion;
 use bytes::buf::Buf;
 use feedfinder::FeedType;
-use flate2::bufread::GzDecoder;
+use flate2::read::GzDecoder;
 use futures::future;
 use governor::{Quota, RateLimiter};
 use nonzero_ext::nonzero;
@@ -31,10 +31,12 @@ use url::Url;
 pub mod archive;
 mod cache;
 mod cdx;
+pub mod parser;
+pub mod s3;
 pub mod site;
 pub mod validator;
 
-use archive::{ArchiveRecord, Archiver};
+use archive::{create_archives, ArchiveFiles, ArchiveRecord};
 use cache::CrawlCache;
 
 use crate::cdx::create_archive_url;
@@ -169,7 +171,7 @@ impl Netrunner {
     }
 
     /// Kick off a crawl for URLs represented by <lens>.
-    pub async fn crawl(&mut self, opts: CrawlOpts) -> Result<Option<PathBuf>> {
+    pub async fn crawl(&mut self, opts: CrawlOpts) -> Result<Option<ArchiveFiles>> {
         let mut cache = CrawlCache::new();
         // ------------------------------------------------------------------------
         // First, build filters based on the lens. This will be used to filter out
@@ -239,8 +241,11 @@ impl Netrunner {
             // CRAWL BABY CRAWL
             // Default to max 2 requests per second for a domain.
             let quota = Quota::per_second(nonzero!(2u32));
-            let archive_path = self.crawl_loop(tmp_storage_path(&self.lens), quota).await?;
-            return Ok(Some(archive_path));
+            let tmp_storage = tmp_storage_path(&self.lens);
+            self.crawl_loop(&tmp_storage, quota).await?;
+            let archives =
+                create_archives(&self.storage, &self.cached_records(&tmp_storage)).await?;
+            return Ok(Some(archives));
         }
 
         Ok(None)
@@ -262,8 +267,7 @@ impl Netrunner {
     }
 
     /// Web Archive (WARC) file format definition: https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1
-    async fn crawl_loop(&mut self, tmp_storage: PathBuf, quota: Quota) -> anyhow::Result<PathBuf> {
-        let mut archiver = Archiver::new(&self.storage).expect("Unable to create archiver");
+    async fn crawl_loop(&mut self, tmp_storage: &PathBuf, quota: Quota) -> anyhow::Result<()> {
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
 
         let progress = Arc::new(AtomicUsize::new(0));
@@ -272,7 +276,7 @@ impl Netrunner {
         let mut already_crawled: HashSet<String> = HashSet::new();
 
         // Before we begin, check to see if we've already crawled anything
-        let recs = self.cached_records(&tmp_storage);
+        let recs = self.cached_records(tmp_storage);
         log::debug!("found {} crawls in cache", recs.len());
         for rec in recs {
             already_crawled.insert(rec.url);
@@ -286,8 +290,9 @@ impl Netrunner {
 
         // Spin up tasks to crawl through everything
         let tasks: Vec<JoinHandle<()>> = to_crawl
+            .flat_map(|url| Url::parse(&url))
             .filter_map(|url| {
-                if already_crawled.contains(&url) {
+                if already_crawled.contains(&url.to_string()) {
                     log::info!("-> skipping {}, already crawled", url);
                     return None;
                 }
@@ -297,12 +302,10 @@ impl Netrunner {
                 let tmp_storage = tmp_storage.clone();
 
                 let res = tokio::spawn(async move {
-                    // OG url
-                    let parsed_url = Url::parse(&url).expect("Invalid URL");
                     // URL to Wayback Machine
-                    let ia_url = create_archive_url(parsed_url.as_ref());
+                    let ia_url = create_archive_url(url.as_ref());
 
-                    let domain = parsed_url.domain().expect("No domain in URL");
+                    let domain = url.domain().expect("No domain in URL");
                     let client = http_client();
 
                     let retry_strat = ExponentialBackoff::from_millis(100).take(3);
@@ -311,16 +314,17 @@ impl Netrunner {
                     let web_archive = Retry::spawn(retry_strat.clone(), || async {
                         // Wait for when we can crawl this based on the domain
                         lim.until_key_ready(&domain.to_string()).await;
-                        fetch_page(&client, &ia_url, Some(parsed_url.to_string()), &tmp_storage)
-                            .await
+                        fetch_page(&client, &ia_url, Some(url.to_string()), &tmp_storage).await
                     })
                     .await;
 
+                    // If we fail trying to get the page from the web archive, hit the
+                    // site directly.
                     if web_archive.is_err() {
                         let _ = Retry::spawn(retry_strat, || async {
                             // Wait for when we can crawl this based on the domain
                             lim.until_key_ready(&domain.to_string()).await;
-                            fetch_page(&client, parsed_url.as_ref(), None, &tmp_storage).await
+                            fetch_page(&client, url.as_ref(), None, &tmp_storage).await
                         })
                         .await;
                     }
@@ -335,22 +339,9 @@ impl Netrunner {
             })
             .collect();
 
-        // Archive responses
+        // Wait til we're finished crawling everything.
         let _ = future::join_all(tasks).await;
-
-        log::info!("Archiving responses");
-        let recs = self.cached_records(&tmp_storage);
-        for rec in recs {
-            // Only save successes to the archive
-            if rec.status >= 200 && rec.status <= 299 {
-                archiver.archive_record(&rec).await?;
-            }
-        }
-
-        let archive_file = archiver.finish()?;
-        log::info!("Finished crawl");
-
-        Ok(archive_file)
+        Ok(())
     }
 
     async fn fetch_rss(&self, info: &SiteInfo) -> Vec<String> {
@@ -500,12 +491,14 @@ impl Netrunner {
 #[cfg(test)]
 mod test {
     use spyglass_lens::LensConfig;
-    use std::io;
+    use std::io::{self, BufRead};
     use std::path::Path;
     use tracing_log::LogTracer;
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    use crate::{site::SiteInfo, validator::validate_lens, CrawlOpts, Netrunner};
+    use crate::{
+        parser::ParseResult, site::SiteInfo, validator::validate_lens, CrawlOpts, Netrunner,
+    };
 
     #[tokio::test]
     async fn test_crawl() {
@@ -527,13 +520,24 @@ mod test {
 
         // Test crawling logic
         let mut netrunner = Netrunner::new(lens.clone());
-        netrunner
+        let archives = netrunner
             .crawl(CrawlOpts {
                 print_urls: false,
                 create_warc: true,
             })
             .await
             .expect("Unable to crawl");
+
+        // Validate archives created are readable.
+        if let Some(archives) = archives {
+            assert!(archives.warc.exists());
+            assert!(archives.parsed.exists());
+
+            let reader =
+                ParseResult::iter_from_gz(&archives.parsed).expect("Unable to read parsed archive");
+
+            assert_eq!(reader.count(), 1);
+        }
 
         // Test validation logic
         if let Err(err) = validate_lens(&lens) {
