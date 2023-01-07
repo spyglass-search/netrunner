@@ -4,7 +4,7 @@ build:
 	cargo build
 
 build-docker:
-	docker build -t netrunner .
+	docker buildx build --platform=linux/amd64 -t netrunner .
 
 install:
 	cargo install --path .
