@@ -31,7 +31,7 @@ impl CrawlCache {
 
             match SiteInfo::new(&base_url).await {
                 Ok(info) => {
-                    let has_sitemap = info.sitemaps.is_empty();
+                    let has_sitemap = !info.sitemaps.is_empty();
                     self.cache.insert(base_url, Some(info));
                     return has_sitemap;
                 }
