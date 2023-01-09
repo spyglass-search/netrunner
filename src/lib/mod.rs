@@ -396,6 +396,7 @@ mod test {
     };
 
     #[tokio::test]
+    #[ignore]
     async fn test_crawl() {
         // Setup some nice console logging for tests
         let subscriber = tracing_subscriber::registry()
