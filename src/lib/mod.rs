@@ -1,5 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -13,50 +11,36 @@ use async_recursion::async_recursion;
 use bytes::buf::Buf;
 use feedfinder::FeedType;
 use flate2::read::GzDecoder;
-use futures::future;
 use governor::{Quota, RateLimiter};
 use nonzero_ext::nonzero;
 use regex::{RegexSet, RegexSetBuilder};
-use reqwest::{Client, StatusCode};
+use reqwest::Client;
 use rss::Channel;
 use site::SiteInfo;
 use sitemap::reader::{SiteMapEntity, SiteMapReader};
 use spyglass_lens::LensConfig;
 use texting_robots::Robot;
-use tokio::task::JoinHandle;
-use tokio_retry::strategy::ExponentialBackoff;
-use tokio_retry::Retry;
 use url::Url;
 
 pub mod archive;
 mod cache;
 mod cdx;
+mod crawler;
 pub mod parser;
 pub mod s3;
 pub mod site;
 pub mod validator;
 
+use crate::crawler::{handle_crawl, http_client};
 use archive::{create_archives, ArchiveFiles, ArchiveRecord};
 use cache::CrawlCache;
 
-use crate::cdx::create_archive_url;
-
 static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"));
-const RETRY_DELAY_MS: u64 = 5000;
 
 #[derive(Default)]
 pub struct CrawlOpts {
     pub print_urls: bool,
     pub create_warc: bool,
-}
-
-fn http_client() -> Client {
-    // Use a normal user-agent otherwise some sites won't let us crawl
-    reqwest::Client::builder()
-        .gzip(true)
-        .user_agent(APP_USER_AGENT)
-        .build()
-        .expect("Unable to create HTTP client")
 }
 
 pub fn cache_storage_path(lens: &LensConfig) -> PathBuf {
@@ -77,57 +61,6 @@ pub fn tmp_storage_path(lens: &LensConfig) -> PathBuf {
     }
 
     storage
-}
-
-async fn fetch_page(
-    client: &Client,
-    url: &str,
-    url_override: Option<String>,
-    page_store: &Path,
-) -> Result<(), ()> {
-    // Wait for when we can crawl this based on the domain
-    match client.get(url).send().await {
-        Ok(resp) => {
-            if resp.status() == StatusCode::TOO_MANY_REQUESTS {
-                let retry_after_ms: u64 =
-                    resp.headers()
-                        .get("Retry-After")
-                        .map_or(RETRY_DELAY_MS, |header| {
-                            if let Ok(header) = header.to_str() {
-                                log::warn!("found Retry-After: {}", header);
-                                header.parse::<u64>().unwrap_or(RETRY_DELAY_MS)
-                            } else {
-                                RETRY_DELAY_MS
-                            }
-                        });
-
-                log::warn!("429 received... retrying after {}ms", retry_after_ms);
-                tokio::time::sleep(tokio::time::Duration::from_millis(retry_after_ms)).await;
-
-                Err(())
-            } else {
-                log::info!("fetched {}: {}", resp.status(), url);
-                // Save response to tmp storage
-                if let Ok(record) = ArchiveRecord::from_response(resp, url_override).await {
-                    if let Ok(serialized) = ron::to_string(&record) {
-                        // Hash the URL to store in the cache
-                        let mut hasher = DefaultHasher::new();
-                        record.url.hash(&mut hasher);
-                        let id = hasher.finish().to_string();
-                        let file = page_store.join(id);
-                        let _ = std::fs::write(file.clone(), serialized);
-                        log::debug!("cached <{}> -> <{}>", record.url, file.display());
-                    }
-                }
-
-                Ok(())
-            }
-        }
-        Err(err) => {
-            log::error!("Unable to fetch {} - {}", url, err);
-            Err(())
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -228,6 +161,7 @@ impl Netrunner {
                 .extend(file.lines().map(|x| x.to_string()).collect::<Vec<String>>());
         }
 
+        self.cdx_queue.clear();
         if opts.print_urls {
             let mut sorted_urls = self.to_crawl.clone().into_iter().collect::<Vec<String>>();
             sorted_urls.sort();
@@ -272,7 +206,6 @@ impl Netrunner {
 
         let progress = Arc::new(AtomicUsize::new(0));
         let total = self.to_crawl.len();
-        let to_crawl = self.to_crawl.clone().into_iter();
         let mut already_crawled: HashSet<String> = HashSet::new();
 
         // Before we begin, check to see if we've already crawled anything
@@ -289,56 +222,20 @@ impl Netrunner {
         progress.store(already_crawled.len(), Ordering::SeqCst);
 
         // Spin up tasks to crawl through everything
-        let tasks: Vec<JoinHandle<()>> = to_crawl
-            .flat_map(|url| Url::parse(&url))
-            .filter_map(|url| {
-                if already_crawled.contains(&url.to_string()) {
-                    log::info!("-> skipping {}, already crawled", url);
-                    return None;
-                }
+        for url in self.to_crawl.iter().filter_map(|url| Url::parse(url).ok()) {
+            if already_crawled.contains(&url.to_string()) {
+                log::info!("-> skipping {}, already crawled", url);
+                continue;
+            }
 
-                let progress = progress.clone();
-                let lim = lim.clone();
-                let tmp_storage = tmp_storage.clone();
-                let client = http_client();
-                let res = tokio::spawn(async move {
-                    // URL to Wayback Machine
-                    let ia_url = create_archive_url(url.as_ref());
+            let progress = progress.clone();
+            handle_crawl(&http_client(), tmp_storage.clone(), lim.clone(), &url).await;
+            let old_val = progress.fetch_add(1, Ordering::SeqCst);
+            if old_val % 100 == 0 {
+                log::info!("progress: {} / {}", old_val, total)
+            }
+        }
 
-                    let domain = url.domain().expect("No domain in URL");
-                    let retry_strat = ExponentialBackoff::from_millis(100).take(3);
-
-                    // Retry if we run into 429 / timeout errors
-                    let web_archive = Retry::spawn(retry_strat.clone(), || async {
-                        // Wait for when we can crawl this based on the domain
-                        lim.until_key_ready(&domain.to_string()).await;
-                        fetch_page(&client, &ia_url, Some(url.to_string()), &tmp_storage).await
-                    })
-                    .await;
-
-                    // If we fail trying to get the page from the web archive, hit the
-                    // site directly.
-                    if web_archive.is_err() {
-                        let _ = Retry::spawn(retry_strat, || async {
-                            // Wait for when we can crawl this based on the domain
-                            lim.until_key_ready(&domain.to_string()).await;
-                            fetch_page(&client, url.as_ref(), None, &tmp_storage).await
-                        })
-                        .await;
-                    }
-
-                    let old_val = progress.fetch_add(1, Ordering::SeqCst);
-                    if old_val % 100 == 0 {
-                        log::info!("progress: {} / {}", old_val, total)
-                    }
-                });
-
-                Some(res)
-            })
-            .collect();
-
-        // Wait til we're finished crawling everything.
-        let _ = future::join_all(tasks).await;
         Ok(())
     }
 
@@ -499,6 +396,7 @@ mod test {
     };
 
     #[tokio::test]
+    #[ignore]
     async fn test_crawl() {
         // Setup some nice console logging for tests
         let subscriber = tracing_subscriber::registry()

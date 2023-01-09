@@ -284,7 +284,6 @@ mod test {
         let doc = html_to_text("https://example.com", html);
 
         assert_eq!(doc.title.unwrap(), "Why YC");
-        dbg!(&doc.description);
         assert_eq!(doc.description, "March 2006, rev August 2009 Yesterday one of the founders we funded asked me why we started Y Combinator .  Or more precisely, he asked if we'd started YC mainly for fun. Kind of, but not quite.  It is enormously fun to be able to work with Rtm and Trevor again.  I missed that after we sold Viaweb, and for all the years after I always had a background process running, looking for something we could do together.  There is definitely an aspect of a band reunion to Y Combinator.  Every couple days I slip and call it \"Viaweb.\" Viaweb we started very explicitly to make money.  I was sick of living from one freelance project to the next, and decided to just work as hard as I could till I'd made enough to solve the problem once and for all.  Viaweb was sometimes fun, but it wasn't designed for fun, and mostly it wasn't.  I'd be surprised if any startup is. All startups are mostly schleps. The real reason we started Y Combinator is neither selfish nor virtuous.  We didn't start it mainly to make money; we have no idea what our average returns might be, and won't know for years.  Nor did we start YC mainly to help out young would-be founders, though we do like the idea, and comfort ourselves occasionally with the thought that if all our investments tank, we will thus have been doing something unselfish.  (It's oddly nondeterministic.) The");
     }
 }
