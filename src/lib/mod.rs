@@ -161,7 +161,23 @@ impl Netrunner {
                 .extend(file.lines().map(|x| x.to_string()).collect::<Vec<String>>());
         }
 
+        // Clear CDX queue after fetching URLs.
         self.cdx_queue.clear();
+        // Ignore invalid URLs and remove fragments from URLs (e.g. http://example.com#Title
+        // is considered the same as http://example.com)
+        self.to_crawl = self
+            .to_crawl
+            .iter()
+            .filter_map(|url| {
+                if let Ok(mut url) = Url::parse(url) {
+                    url.set_fragment(None);
+                    Some(url.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         if opts.print_urls {
             let mut sorted_urls = self.to_crawl.clone().into_iter().collect::<Vec<String>>();
             sorted_urls.sort();
