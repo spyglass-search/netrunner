@@ -187,7 +187,8 @@ pub fn html_to_text(url: &str, doc: &str) -> ParseResult {
             parsed.set_fragment(None);
             Some(parsed.to_string())
         }
-        _ => None,
+        // Use the original URL if we are unable to determine the canonical URL from meta tags.
+        _ => Some(url.to_string()),
     };
 
     ParseResult::builder()
