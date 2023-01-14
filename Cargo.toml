@@ -1,6 +1,6 @@
 [package]
 name = "spyglass-netrunner"
-version = "0.1.9"
+version = "0.1.10"
 authors = ["Andrew Huynh <andrew@spyglass.fyi>"]
 description = "A small CLI utility to help build lenses for spyglass"
 edition = "2021"
