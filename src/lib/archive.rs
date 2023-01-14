@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 use std::io::{BufWriter, Read, Write};
 use std::{
@@ -251,14 +252,18 @@ pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<()> {
     let mut gz = GzEncoder::new(&archive_path, Compression::default());
 
     let mut buffer = String::new();
+    let mut archived_urls = HashSet::new();
     for record in warc.iter_records().flatten() {
         buffer.clear();
         if record.body().read_to_string(&mut buffer).is_ok() {
             if let Some(url) = record.header(WarcHeader::TargetURI) {
-                let (_, content) = Archiver::parse_body(&buffer);
-                let parsed = crate::parser::html::html_to_text(&url, &content);
-                let ser = ron::ser::to_string(&parsed).unwrap();
-                gz.write_fmt(format_args!("{}\n", ser))?;
+                if !archived_urls.contains(&url.to_string()) {
+                    let (_, content) = Archiver::parse_body(&buffer);
+                    let parsed = crate::parser::html::html_to_text(&url, &content);
+                    let ser = ron::ser::to_string(&parsed).unwrap();
+                    gz.write_fmt(format_args!("{}\n", ser))?;
+                    archived_urls.insert(url.to_string());
+                }
             }
         }
     }
@@ -280,13 +285,15 @@ pub async fn create_archives(
     let parsed_archive =
         std::fs::File::create(parsed_archive_path.clone()).expect("Unable to create file");
     let mut gz = GzEncoder::new(&parsed_archive, Compression::default());
+    let mut archived_urls = HashSet::new();
     for rec in records {
         // Only save successes to the archive
-        if rec.status >= 200 && rec.status <= 299 {
+        if rec.status >= 200 && rec.status <= 299 && !archived_urls.contains(&rec.url) {
             let parsed = crate::parser::html::html_to_text(&rec.url, &rec.content);
             let ser = ron::ser::to_string(&parsed).unwrap();
             gz.write_fmt(format_args!("{}\n", ser))?;
             archiver.archive_record(rec).await?;
+            archived_urls.insert(rec.url.clone());
         }
     }
     gz.finish()?;
