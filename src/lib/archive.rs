@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::parser::ParseResult;
 use chrono::prelude::*;
 use flate2::{write::GzEncoder, Compression};
 use reqwest::Response;
@@ -238,7 +239,7 @@ pub struct ArchiveFiles {
 }
 
 /// Create a preproprocessed archive from an existing WARC file
-pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<()> {
+pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<PathBuf> {
     let parent_dir = warc.parent().expect("Unable to get parent folder");
     log::info!("Saving preprocessed archive to: {}", parent_dir.display());
 
@@ -253,22 +254,51 @@ pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<()> {
 
     let mut buffer = String::new();
     let mut archived_urls = HashSet::new();
+    let mut duplicate_count = 0;
+
     for record in warc.iter_records().flatten() {
         buffer.clear();
         if record.body().read_to_string(&mut buffer).is_ok() {
             if let Some(url) = record.header(WarcHeader::TargetURI) {
-                if !archived_urls.contains(&url.to_string()) {
-                    let (_, content) = Archiver::parse_body(&buffer);
-                    let parsed = crate::parser::html::html_to_text(&url, &content);
-                    let ser = ron::ser::to_string(&parsed).unwrap();
-                    gz.write_fmt(format_args!("{}\n", ser))?;
-                    archived_urls.insert(url.to_string());
+                let (_, content) = Archiver::parse_body(&buffer);
+                let parsed = crate::parser::html::html_to_text(&url, &content);
+                let ser = ron::ser::to_string(&parsed).unwrap();
+
+                if let Some(canonical) = parsed.canonical_url {
+                    if let Ok(canonical) = url::Url::parse(&canonical) {
+                        if !archived_urls.contains(&canonical.to_string()) {
+                            gz.write_fmt(format_args!("{}\n", ser))?;
+                            archived_urls.insert(canonical.to_string());
+                        } else {
+                            duplicate_count += 1;
+                        }
+                    }
                 }
             }
         }
     }
+
     gz.finish()?;
+    log::info!("Found {duplicate_count} duplicates");
+    log::info!("Preprocess {} docs", archived_urls.len());
     log::info!("Saved parsed results to: {}", path.display());
+
+    Ok(path)
+}
+
+pub fn validate_preprocessed_archive(path: &Path) -> anyhow::Result<()> {
+    let mut urls = HashSet::new();
+    for res in ParseResult::iter_from_gz(path)? {
+        let url = res.canonical_url.expect("Must have canonical URL");
+        if urls.contains(&url) {
+            return Err(anyhow::anyhow!(
+                "Duplicate URL found in preprocessed archive: {:?}",
+                url
+            ));
+        } else {
+            urls.insert(url);
+        }
+    }
 
     Ok(())
 }
@@ -290,10 +320,17 @@ pub async fn create_archives(
         // Only save successes to the archive
         if rec.status >= 200 && rec.status <= 299 && !archived_urls.contains(&rec.url) {
             let parsed = crate::parser::html::html_to_text(&rec.url, &rec.content);
-            let ser = ron::ser::to_string(&parsed).unwrap();
-            gz.write_fmt(format_args!("{}\n", ser))?;
+            let canonical_url = parsed.canonical_url.clone();
             archiver.archive_record(rec).await?;
-            archived_urls.insert(rec.url.clone());
+
+            // Only add to preprocessed file if canonical url is unique.
+            if let Some(Ok(canonical)) = canonical_url.map(|x| url::Url::parse(&x)) {
+                if !archived_urls.contains(&canonical.to_string()) {
+                    let ser = ron::ser::to_string(&parsed).unwrap();
+                    gz.write_fmt(format_args!("{}\n", ser))?;
+                    archived_urls.insert(canonical.to_string());
+                }
+            }
         }
     }
     gz.finish()?;
