@@ -130,6 +130,23 @@ fn filter_text_nodes(root: &NodeRef<Node>, doc: &mut String, links: &mut HashSet
     }
 }
 
+/// Processes the html document and pulls out the canonical url
+pub fn process_canonical_url(url: &str, doc: &str) -> String {
+    let parsed = Html::parse(doc);
+    let link_tags = parsed.link_tags();
+
+    match link_tags.get("canonical").map(|x| Url::parse(x)) {
+        // Canonical URLs *must* be a full, valid URL
+        Some(Ok(mut parsed)) => {
+            // Ignore fragments
+            parsed.set_fragment(None);
+            parsed.to_string()
+        }
+        // Use the original URL if we are unable to determine the canonical URL from meta tags.
+        _ => url.to_string(),
+    }
+}
+
 /// Filters a DOM tree into a text document used for indexing
 pub fn html_to_text(url: &str, doc: &str) -> ParseResult {
     let parsed = Html::parse(doc);

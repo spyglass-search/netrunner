@@ -303,6 +303,37 @@ pub fn validate_preprocessed_archive(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn warc_to_iterator(
+    warc: &Path,
+) -> anyhow::Result<impl Iterator<Item = Option<ArchiveRecord>>> {
+    let parent_dir = warc.parent().expect("Unable to get parent folder");
+    log::info!("Saving preprocessed archive to: {}", parent_dir.display());
+
+    let warc = WarcReader::from_path_gzip(warc)?;
+
+    let record_itr = warc.iter_records().map(move |record_rslt| {
+        if let Ok(record) = record_rslt {
+            let url = record
+                .header(WarcHeader::TargetURI)
+                .expect("TargetURI not set")
+                .to_string();
+
+            if let Ok(body) = String::from_utf8(record.body().into()) {
+                let (headers, content) = Archiver::parse_body(&body);
+                return Option::Some(ArchiveRecord {
+                    status: 200u16,
+                    url,
+                    headers,
+                    content,
+                });
+            }
+        }
+        Option::None
+    });
+
+    Ok(record_itr)
+}
+
 /// Creates gzipped archives for all the crawls & preprocessed crawl content.
 pub async fn create_archives(
     storage: &Path,
