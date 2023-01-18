@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use libnetrunner::CrawlOpts;
+use ron::ser::PrettyConfig;
 use spyglass_lens::LensConfig;
 use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
@@ -43,6 +44,8 @@ enum Commands {
     Clean,
     /// Crawls & creates a web archive for the pages represented by <lens-file>
     Crawl,
+    /// Parse a single HTML file, returning the expected result
+    Parse { html_file: PathBuf },
     /// Generate a preprocessed archive file from an archive.warc.gz file.
     Preprocess { warc: PathBuf },
     /// Validate the lens file and, if available, the cached web archive for <lens-file>
@@ -150,6 +153,13 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                 libnetrunner::s3::upload_to_bucket(&archive_path.parsed, s3_bucket, &key).await?;
             }
 
+            Ok(())
+        }
+        Commands::Parse { html_file } => {
+            let html = std::fs::read_to_string(html_file)?;
+            let parsed = libnetrunner::parser::html::html_to_text("https://example.com", &html);
+            let ser = ron::ser::to_string_pretty(&parsed, PrettyConfig::default())?;
+            println!("{}\n", ser);
             Ok(())
         }
         Commands::Preprocess { warc } => {
