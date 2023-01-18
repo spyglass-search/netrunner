@@ -266,9 +266,10 @@ pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<PathBuf> {
 
                 if let Some(canonical) = parsed.canonical_url {
                     if let Ok(canonical) = url::Url::parse(&canonical) {
-                        if !archived_urls.contains(&canonical.to_string()) {
+                        let url_str = canonical.to_string();
+                        if !archived_urls.contains(&url_str) {
                             gz.write_fmt(format_args!("{}\n", ser))?;
-                            archived_urls.insert(canonical.to_string());
+                            archived_urls.insert(url_str);
                         } else {
                             duplicate_count += 1;
                         }
