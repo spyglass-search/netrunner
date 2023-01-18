@@ -86,10 +86,25 @@ fn filter_text_nodes(root: &NodeRef<Node>, doc: &mut String, links: &mut HashSet
 
     let href_key = QualName::new(None, ns!(), local_name!("href"));
     let role_key = QualName::new(None, ns!(), local_name!("role"));
+    let mut noindex_skip = false;
 
     for child in root.children() {
+        if noindex_skip {
+            continue;
+        }
+
         let node = child.value();
-        if node.is_text() {
+        // Handle comments indicating we should skip parsing content nodes.
+        // Rare, but happens in wikipedia exports.
+        if node.is_comment() {
+            if let Some(comment) = node.as_comment() {
+                if comment.contains("htdig_noindex") {
+                    noindex_skip = true;
+                } else if comment.contains("/htdig_noindex") {
+                    noindex_skip = false;
+                }
+            }
+        } else if node.is_text() {
             doc.push_str(node.as_text().unwrap());
         } else if node.is_element() {
             // Ignore elements on the ignore list
