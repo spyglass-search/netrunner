@@ -21,7 +21,7 @@ pub struct Archiver {
     writer: WarcWriter<BufWriter<File>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ArchiveRecord {
     pub status: u16,
     pub url: String,
