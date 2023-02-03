@@ -6,6 +6,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::Retry;
 
@@ -22,7 +23,8 @@ pub fn http_client() -> Client {
     reqwest::Client::builder()
         .gzip(true)
         .user_agent(APP_USER_AGENT)
-        .connect_timeout(std::time::Duration::from_secs(1))
+        .connect_timeout(Duration::from_secs(1))
+        .timeout(Duration::from_secs(10))
         .build()
         .expect("Unable to create HTTP client")
 }
@@ -38,22 +40,26 @@ pub async fn handle_crawl(
 
     let domain = url.domain().expect("No domain in URL");
 
-    let retry_strat = ExponentialBackoff::from_millis(100).take(3);
+    let retry_strat = ExponentialBackoff::from_millis(100)
+        .max_delay(Duration::from_secs(5))
+        .take(3);
 
     // Retry if we run into 429 / timeout errors
     let web_archive = Retry::spawn(retry_strat.clone(), || async {
+        log::info!("trying to fetch from IA");
         // Wait for when we can crawl this based on the domain
         lim.until_key_ready(&domain.to_string()).await;
         fetch_page(client, &ia_url, Some(url.to_string()), &tmp_storage).await
     })
     .await;
-
     // If we fail trying to get the page from the web archive, hit the
     // site directly.
     if web_archive.is_err() {
-        log::info!("attempting to pull from main website");
-        let retry_strat = ExponentialBackoff::from_millis(100).take(3);
+        let retry_strat = ExponentialBackoff::from_millis(100)
+            .max_delay(Duration::from_secs(5))
+            .take(3);
         let _ = Retry::spawn(retry_strat, || async {
+            log::info!("trying to fetch from origin");
             // Wait for when we can crawl this based on the domain
             lim.until_key_ready(&domain.to_string()).await;
             fetch_page(client, url.as_ref(), None, &tmp_storage).await
