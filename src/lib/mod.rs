@@ -192,9 +192,9 @@ impl Netrunner {
             let mut sorted_urls = self.to_crawl.clone().into_iter().collect::<Vec<String>>();
             sorted_urls.sort();
             for url in &sorted_urls {
-                log::info!("{}", url);
+                println!("{}", url);
             }
-            log::info!("Discovered {} urls for lens", sorted_urls.len());
+            eprintln!("Discovered {} urls for lens", sorted_urls.len());
         }
 
         if opts.create_warc {
@@ -228,7 +228,7 @@ impl Netrunner {
                 records.push((rec, None));
             }
         }
-        
+
 
         return Ok(records);
     }
