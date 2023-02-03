@@ -159,7 +159,7 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
             let html = std::fs::read_to_string(html_file)?;
             let parsed = libnetrunner::parser::html::html_to_text("https://example.com", &html);
             let ser = ron::ser::to_string_pretty(&parsed, PrettyConfig::default())?;
-            println!("{}\n", ser);
+            println!("{ser}\n");
             Ok(())
         }
         Commands::Preprocess { warc } => {

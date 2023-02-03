@@ -97,7 +97,7 @@ impl Archiver {
     }
 
     pub fn read(path: &Path) -> anyhow::Result<Vec<ArchiveRecord>> {
-        let warc_path = if !path.ends_with(format!("{}.gz", ARCHIVE_FILE)) {
+        let warc_path = if !path.ends_with(format!("{ARCHIVE_FILE}.gz")) {
             let mut warc_path = path.join(ARCHIVE_FILE);
             warc_path.set_extension("warc.gz");
             warc_path
@@ -220,11 +220,11 @@ impl Archiver {
         // Output headers into HTTP format
         let mut headers = "HTTP/1.1 200 OK\n".to_string();
         for (name, value) in record.headers.iter() {
-            let _ = writeln!(headers, "{}: {}", name, value);
+            let _ = writeln!(headers, "{name}: {value}");
         }
 
         let body = record.content.clone();
-        let content = format!("{}\n{}", headers, body);
+        let content = format!("{headers}\n{body}");
         let warc_header = Self::generate_header(&url, content.len());
 
         let bytes_written = self.writer.write_raw(warc_header, &content)?;
@@ -268,7 +268,7 @@ pub fn preprocess_warc_archive(warc: &Path) -> anyhow::Result<PathBuf> {
                     if let Ok(canonical) = url::Url::parse(&canonical) {
                         let url_str = canonical.to_string();
                         if !archived_urls.contains(&url_str) {
-                            gz.write_fmt(format_args!("{}\n", ser))?;
+                            gz.write_fmt(format_args!("{ser}\n"))?;
                             archived_urls.insert(url_str);
                         } else {
                             duplicate_count += 1;
@@ -359,7 +359,7 @@ pub async fn create_archives(
             if let Some(Ok(canonical)) = canonical_url.map(|x| url::Url::parse(&x)) {
                 if !archived_urls.contains(&canonical.to_string()) {
                     let ser = ron::ser::to_string(&parsed).unwrap();
-                    gz.write_fmt(format_args!("{}\n", ser))?;
+                    gz.write_fmt(format_args!("{ser}\n"))?;
                     archived_urls.insert(canonical.to_string());
                 }
             }

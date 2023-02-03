@@ -136,7 +136,7 @@ impl Netrunner {
         // ------------------------------------------------------------------------
         log::info!("Fetching robots.txt & sitemaps.xml");
         for domain in self.lens.domains.iter() {
-            let domain_url = format!("http://{}", domain);
+            let domain_url = format!("http://{domain}");
             // If there are no sitemaps, add to CDX queue
             if !cache.process_url(&domain_url).await {
                 self.cdx_queue.insert(domain_url);
@@ -194,7 +194,7 @@ impl Netrunner {
             let mut sorted_urls = self.to_crawl.clone().into_iter().collect::<Vec<String>>();
             sorted_urls.sort();
             for url in &sorted_urls {
-                println!("{}", url);
+                println!("{url}");
             }
             eprintln!("Discovered {} urls for lens", sorted_urls.len());
         }
@@ -233,7 +233,7 @@ impl Netrunner {
             }
         }
 
-        return Ok(records);
+        Ok(records)
     }
 
     pub fn clear_cache(&self) -> Result<(), std::io::Error> {
@@ -433,7 +433,7 @@ impl Netrunner {
         sorted.sort();
 
         for url in sorted {
-            let _ = file.write(format!("{}\n", url).as_bytes());
+            let _ = file.write(format!("{url}\n").as_bytes());
         }
     }
 }
@@ -492,7 +492,7 @@ mod test {
 
         // Test validation logic
         if let Err(err) = validate_lens(&lens) {
-            eprintln!("Failed validation: {}", err);
+            eprintln!("Failed validation: {err}");
             panic!("Failed");
         }
     }

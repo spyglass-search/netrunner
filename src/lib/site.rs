@@ -16,7 +16,7 @@ impl SiteInfo {
         let domain_url = if domain.starts_with("http") {
             domain.to_string()
         } else {
-            format!("http://{}", domain)
+            format!("http://{domain}")
         };
 
         let mut feeds = Vec::new();
@@ -68,7 +68,7 @@ impl SiteInfo {
 
         println!("\n== Sitemaps ({}) ==", self.sitemaps.len());
         for sm in &self.sitemaps {
-            println!("- {}", sm);
+            println!("- {sm}");
         }
     }
 }
