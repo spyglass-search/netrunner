@@ -51,6 +51,8 @@ pub async fn handle_crawl(
     // If we fail trying to get the page from the web archive, hit the
     // site directly.
     if web_archive.is_err() {
+        log::info!("attempting to pull from main website");
+        let retry_strat = ExponentialBackoff::from_millis(100).take(3);
         let _ = Retry::spawn(retry_strat, || async {
             // Wait for when we can crawl this based on the domain
             lim.until_key_ready(&domain.to_string()).await;
@@ -82,7 +84,7 @@ async fn fetch_page(
                             }
                         });
 
-                log::warn!("429 received... retrying after {}ms", retry_after_ms);
+                log::info!("429 received... retrying after {}ms", retry_after_ms);
                 tokio::time::sleep(tokio::time::Duration::from_millis(retry_after_ms)).await;
 
                 Err(())
