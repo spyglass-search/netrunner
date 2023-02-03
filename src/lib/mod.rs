@@ -105,10 +105,12 @@ impl Netrunner {
     }
 
     pub async fn get_urls(&mut self) -> Vec<String> {
-        let _rslt = self.crawl(CrawlOpts {
-            print_urls: false,
-            create_warc: false
-        }).await;
+        let _rslt = self
+            .crawl(CrawlOpts {
+                print_urls: false,
+                create_warc: false,
+            })
+            .await;
 
         self.to_crawl.clone().into_iter().collect()
     }
@@ -211,7 +213,10 @@ impl Netrunner {
         Ok(None)
     }
 
-    pub async fn crawl_url(&mut self, url: String) -> Result<Vec<(ArchiveRecord, Option<ParseResult>)>> {
+    pub async fn crawl_url(
+        &mut self,
+        url: String,
+    ) -> Result<Vec<(ArchiveRecord, Option<ParseResult>)>> {
         self.to_crawl.insert(url);
         let quota = Quota::per_second(nonzero!(2u32));
         let tmp_storage = tmp_storage_path(&self.lens);
@@ -223,12 +228,10 @@ impl Netrunner {
             if rec.status >= 200 && rec.status <= 299 {
                 let parsed = crate::parser::html::html_to_text(&rec.url, &rec.content);
                 records.push((rec, Some(parsed)));
-            }
-            else {
+            } else {
                 records.push((rec, None));
             }
         }
-
 
         return Ok(records);
     }
