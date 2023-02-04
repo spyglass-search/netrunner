@@ -30,6 +30,24 @@ pub struct ArchiveRecord {
 }
 
 impl ArchiveRecord {
+    pub async fn from_file(file: &Path, base_url: &str) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(file)?;
+        let name = file
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .replace(".html", "");
+
+        let url = format!("{base_url}/{name}");
+
+        Ok(ArchiveRecord {
+            status: 200,
+            url,
+            headers: Vec::new(),
+            content,
+        })
+    }
+
     pub async fn from_response(
         resp: Response,
         url_override: Option<String>,
@@ -341,8 +359,11 @@ pub async fn create_archives(
     records: &[ArchiveRecord],
 ) -> anyhow::Result<ArchiveFiles> {
     log::info!("Archiving responses & pre-processed");
-    let mut archiver = Archiver::new(storage).expect("Unable to create archiver");
+    if !storage.exists() {
+        let _ = std::fs::create_dir_all(storage);
+    }
 
+    let mut archiver = Archiver::new(storage).expect("Unable to create archive");
     let parsed_archive_path = storage.join(PARSED_ARCHIVE_FILE);
     let parsed_archive =
         std::fs::File::create(parsed_archive_path.clone()).expect("Unable to create file");

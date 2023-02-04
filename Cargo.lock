@@ -1884,6 +1884,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4501abdff3ae82a1c1b477a17252eb69cee9e66eb915c1abaa4f44d873df9f09"
 
 [[package]]
+name = "same-file"
+version = "1.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
+dependencies = [
+ "winapi-util",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2083,11 +2092,13 @@ dependencies = [
 
 [[package]]
 name = "spyglass-lens"
-version = "0.1.2"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaa3ebc6753018e7c13eecfaabe9a6b676015e8367c5b7980b996699841cb088"
+checksum = "81d7b2343d361a603809468953b6b960ae1d1ef623f5923bda23e272e78e7a32"
 dependencies = [
  "anyhow",
+ "blake2",
+ "hex",
  "regex",
  "ron",
  "serde",
@@ -2130,6 +2141,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid 1.1.2",
+ "walkdir",
  "warc",
 ]
 
@@ -2526,6 +2538,17 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "walkdir"
+version = "2.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "808cf2735cd4b6866113f648b791c6adc5714537bc222d9347bb203386ffda56"
+dependencies = [
+ "same-file",
+ "winapi",
+ "winapi-util",
+]
 
 [[package]]
 name = "want"
