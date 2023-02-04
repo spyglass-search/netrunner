@@ -1,9 +1,11 @@
 use clap::{Parser, Subcommand};
+use libnetrunner::archive::{create_archives, ArchiveRecord};
 use libnetrunner::CrawlOpts;
 use ron::ser::PrettyConfig;
 use spyglass_lens::LensConfig;
 use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
+use walkdir::WalkDir;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -44,6 +46,12 @@ enum Commands {
     Clean,
     /// Crawls & creates a web archive for the pages represented by <lens-file>
     Crawl,
+    /// Crawls a folder (recursively) for web pages & creates a WARC & preprocessed archive
+    CrawlFolder {
+        base_url: String,
+        output: PathBuf,
+        folder: PathBuf,
+    },
     /// Parse a single HTML file, returning the expected result
     Parse { html_file: PathBuf },
     /// Generate a preprocessed archive file from an archive.warc.gz file.
@@ -153,6 +161,43 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                 libnetrunner::s3::upload_to_bucket(&archive_path.parsed, s3_bucket, &key).await?;
             }
 
+            Ok(())
+        }
+        Commands::CrawlFolder {
+            base_url,
+            output,
+            folder,
+        } => {
+            let mut records: Vec<ArchiveRecord> = Vec::new();
+            let mut urls = Vec::new();
+            for entry in WalkDir::new(folder)
+                .into_iter()
+                .flatten()
+                .filter(|f| f.file_type().is_file())
+            {
+                log::info!("Processing {:?}", entry.file_name());
+                match ArchiveRecord::from_file(entry.path(), base_url).await {
+                    Ok(record) => {
+                        urls.push(record.url.clone());
+                        records.push(record)
+                    }
+                    Err(err) => log::error!(
+                        "Unable to convert file ({:?}) to record: {}",
+                        entry.path(),
+                        err
+                    ),
+                }
+            }
+
+            let _ = create_archives(output, &records).await;
+            // Create a basic lens config
+            let config = LensConfig {
+                name: "wikipedia".to_string(),
+                urls,
+                ..Default::default()
+            };
+            let writer = std::fs::File::create(output.join("lens.ron"))?;
+            ron::ser::to_writer(writer, &config)?;
             Ok(())
         }
         Commands::Parse { html_file } => {
