@@ -245,11 +245,16 @@ impl Netrunner {
 
         let mut recs = Vec::new();
         for path in paths.flatten() {
-            let record = ron::from_str::<ArchiveRecord>(
-                &std::fs::read_to_string(path.path()).expect("Unable to read cache file"),
-            )
-            .expect("Unable to deserialize record");
-            recs.push(record);
+            match std::fs::read_to_string(path.path()) {
+                Ok(contents) => {
+                    if let Ok(record) = ron::from_str::<ArchiveRecord>(&contents) {
+                        recs.push(record);
+                    }
+                }
+                Err(_) => {
+                    let _ = std::fs::remove_file(path.path());
+                }
+            }
         }
 
         recs

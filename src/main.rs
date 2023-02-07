@@ -190,7 +190,7 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
             }
 
             let _ = create_archives(output, &records).await;
-            
+
             // Create a basic lens config
             urls.sort();
             let config = LensConfig {
