@@ -178,7 +178,7 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                 log::info!("Processing {:?}", entry.file_name());
                 match ArchiveRecord::from_file(entry.path(), base_url).await {
                     Ok(record) => {
-                        urls.push(record.url.clone());
+                        urls.push(format!("{}$", record.url.clone()));
                         records.push(record)
                     }
                     Err(err) => log::error!(
@@ -190,14 +190,17 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
             }
 
             let _ = create_archives(output, &records).await;
+            
             // Create a basic lens config
+            urls.sort();
             let config = LensConfig {
                 name: "wikipedia".to_string(),
                 urls,
                 ..Default::default()
             };
+
             let writer = std::fs::File::create(output.join("lens.ron"))?;
-            ron::ser::to_writer(writer, &config)?;
+            ron::ser::to_writer_pretty(writer, &config, PrettyConfig::default())?;
             Ok(())
         }
         Commands::Parse { html_file } => {
