@@ -247,18 +247,31 @@ impl Netrunner {
     fn cached_records(&self, tmp_storage: &PathBuf) -> Vec<(String, PathBuf)> {
         let paths = std::fs::read_dir(tmp_storage).expect("unable to read tmp storage dir");
 
+        let mut existing = HashSet::new();
+        let mut to_remove = Vec::new();
         let mut recs = Vec::new();
         for path in paths.flatten() {
             match std::fs::read_to_string(path.path()) {
                 Ok(contents) => {
                     if let Ok(record) = ron::from_str::<ArchiveRecord>(&contents) {
-                        recs.push((record.url, path.path()));
+                        let url = record.url;
+                        if existing.contains(&url) {
+                            to_remove.push(path.path());
+                        } else {
+                            existing.insert(url.clone());
+                            recs.push((url, path.path()));
+                        }
                     }
                 }
                 Err(_) => {
                     let _ = std::fs::remove_file(path.path());
                 }
             }
+        }
+
+        log::info!("Removing {} existing caches", to_remove.len());
+        for path in to_remove {
+            let _ = std::fs::remove_file(path);
         }
 
         recs
