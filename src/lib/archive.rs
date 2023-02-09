@@ -356,7 +356,7 @@ pub fn warc_to_iterator(
 /// Creates gzipped archives for all the crawls & preprocessed crawl content.
 pub async fn create_archives(
     storage: &Path,
-    records: &[ArchiveRecord],
+    records: &[(String, PathBuf)],
 ) -> anyhow::Result<ArchiveFiles> {
     log::info!("Archiving responses & pre-processed");
     if !storage.exists() {
@@ -369,19 +369,24 @@ pub async fn create_archives(
         std::fs::File::create(parsed_archive_path.clone()).expect("Unable to create file");
     let mut gz = GzEncoder::new(&parsed_archive, Compression::default());
     let mut archived_urls = HashSet::new();
-    for rec in records {
-        // Only save successes to the archive
-        if rec.status >= 200 && rec.status <= 299 && !archived_urls.contains(&rec.url) {
-            let parsed = crate::parser::html::html_to_text(&rec.url, &rec.content);
-            let canonical_url = parsed.canonical_url.clone();
-            archiver.archive_record(rec).await?;
+    for content in records
+        .iter()
+        .filter_map(|(_, path)| std::fs::read_to_string(path).ok())
+    {
+        if let Ok(rec) = ron::from_str::<ArchiveRecord>(&content) {
+            // Only save successes to the archive
+            if rec.status >= 200 && rec.status <= 299 && !archived_urls.contains(&rec.url) {
+                let parsed = crate::parser::html::html_to_text(&rec.url, &rec.content);
+                let canonical_url = parsed.canonical_url.clone();
+                archiver.archive_record(&rec).await?;
 
-            // Only add to preprocessed file if canonical url is unique.
-            if let Some(Ok(canonical)) = canonical_url.map(|x| url::Url::parse(&x)) {
-                if !archived_urls.contains(&canonical.to_string()) {
-                    let ser = ron::ser::to_string(&parsed).unwrap();
-                    gz.write_fmt(format_args!("{ser}\n"))?;
-                    archived_urls.insert(canonical.to_string());
+                // Only add to preprocessed file if canonical url is unique.
+                if let Some(Ok(canonical)) = canonical_url.map(|x| url::Url::parse(&x)) {
+                    if !archived_urls.contains(&canonical.to_string()) {
+                        let ser = ron::ser::to_string(&parsed).unwrap();
+                        gz.write_fmt(format_args!("{ser}\n"))?;
+                        archived_urls.insert(canonical.to_string());
+                    }
                 }
             }
         }

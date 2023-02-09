@@ -224,12 +224,16 @@ impl Netrunner {
         let archived = self.cached_records(&tmp_storage);
 
         let mut records = Vec::new();
-        for rec in archived {
-            if rec.status >= 200 && rec.status <= 299 {
-                let parsed = crate::parser::html::html_to_text(&rec.url, &rec.content);
-                records.push((rec, Some(parsed)));
-            } else {
-                records.push((rec, None));
+        for (_, path) in archived {
+            if let Ok(Ok(rec)) =
+                std::fs::read_to_string(path).map(|s| ron::from_str::<ArchiveRecord>(&s))
+            {
+                if rec.status >= 200 && rec.status <= 299 {
+                    let parsed = crate::parser::html::html_to_text(&rec.url, &rec.content);
+                    records.push((rec, Some(parsed)));
+                } else {
+                    records.push((rec, None));
+                }
             }
         }
 
@@ -240,7 +244,7 @@ impl Netrunner {
         std::fs::remove_dir_all(tmp_storage_path(&self.lens))
     }
 
-    fn cached_records(&self, tmp_storage: &PathBuf) -> Vec<ArchiveRecord> {
+    fn cached_records(&self, tmp_storage: &PathBuf) -> Vec<(String, PathBuf)> {
         let paths = std::fs::read_dir(tmp_storage).expect("unable to read tmp storage dir");
 
         let mut recs = Vec::new();
@@ -248,7 +252,7 @@ impl Netrunner {
             match std::fs::read_to_string(path.path()) {
                 Ok(contents) => {
                     if let Ok(record) = ron::from_str::<ArchiveRecord>(&contents) {
-                        recs.push(record);
+                        recs.push((record.url, path.path()));
                     }
                 }
                 Err(_) => {
@@ -271,8 +275,8 @@ impl Netrunner {
         // Before we begin, check to see if we've already crawled anything
         let recs = self.cached_records(tmp_storage);
         log::debug!("found {} crawls in cache", recs.len());
-        for rec in recs {
-            already_crawled.insert(rec.url);
+        for (url, _) in recs {
+            already_crawled.insert(url);
         }
 
         log::info!(

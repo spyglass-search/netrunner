@@ -168,7 +168,7 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
             output,
             folder,
         } => {
-            let mut records: Vec<ArchiveRecord> = Vec::new();
+            let mut records: Vec<(String, PathBuf)> = Vec::new();
             let mut urls = Vec::new();
             for entry in WalkDir::new(folder)
                 .into_iter()
@@ -179,7 +179,7 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
                 match ArchiveRecord::from_file(entry.path(), base_url).await {
                     Ok(record) => {
                         urls.push(format!("{}$", record.url.clone()));
-                        records.push(record)
+                        records.push((record.url, entry.path().to_path_buf()))
                     }
                     Err(err) => log::error!(
                         "Unable to convert file ({:?}) to record: {}",
