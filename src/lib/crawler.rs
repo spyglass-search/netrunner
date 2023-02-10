@@ -124,25 +124,28 @@ async fn fetch_page(
 
 #[cfg(test)]
 mod test {
-    use std::io;
-    use std::{path::Path, sync::Arc};
+    use super::{handle_crawl, http_client};
     use governor::{Quota, RateLimiter};
     use nonzero_ext::nonzero;
+    use std::io;
+    use std::{path::Path, sync::Arc};
     use tracing_log::LogTracer;
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::{fmt, prelude::__tracing_subscriber_SubscriberExt};
     use url::Url;
-    use super::{handle_crawl, http_client};
 
     #[tokio::test]
     #[ignore = "live http request"]
     async fn test_handle_404() {
         // Setup some nice console logging
         let subscriber = tracing_subscriber::registry()
-            .with(EnvFilter::from_default_env()
-                .add_directive("libnetrunner=DEBUG".parse().expect("Invalid log filter")))
+            .with(
+                EnvFilter::from_default_env()
+                    .add_directive("libnetrunner=DEBUG".parse().expect("Invalid log filter")),
+            )
             .with(fmt::Layer::new().with_writer(io::stdout));
-        tracing::subscriber::set_global_default(subscriber).expect("Unable to set a global subscriber");
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("Unable to set a global subscriber");
         LogTracer::init().expect("Unable to create logger");
 
         let client = http_client();
@@ -151,14 +154,11 @@ mod test {
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
 
         // Known to 404 in the web archive, but actually exists.
-        let url = Url::parse("https://developers.home-assistant.io/blog/2020/05/08/logos-custom-integrations")
-            .expect("Invalid URL");
+        let url = Url::parse(
+            "https://developers.home-assistant.io/blog/2020/05/08/logos-custom-integrations",
+        )
+        .expect("Invalid URL");
 
-        handle_crawl(
-            &client,
-            path.to_path_buf(),
-            lim.clone(),
-            &url
-        ).await;
+        handle_crawl(&client, path.to_path_buf(), lim.clone(), &url).await;
     }
 }
