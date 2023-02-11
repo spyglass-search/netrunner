@@ -2114,6 +2114,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "dashmap",
  "ego-tree",
  "feedfinder",
  "flate2",
