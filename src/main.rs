@@ -11,6 +11,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use tokio::runtime;
 
+use libnetrunner::bootstrap::Bootstrapper;
 use libnetrunner::validator::validate_lens;
 use libnetrunner::{site::SiteInfo, Netrunner};
 
@@ -113,20 +114,15 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
         }
         Commands::CheckUrls => {
             let lens = _parse_lens(cli).await?;
-            let mut netrunner = Netrunner::new(lens);
-            // Remove previous urls.txt if any
-            if netrunner.url_txt_path().exists() {
-                let _ = std::fs::remove_file(netrunner.url_txt_path());
-                netrunner.state.has_urls = false;
+            let mut bootstrapper = Bootstrapper::default();
+            bootstrapper.find_urls(&lens).await?;
+
+            let mut sorted = bootstrapper.to_crawl.iter().collect::<Vec<_>>();
+            sorted.sort();
+
+            for url in sorted {
+                println!("{url}");
             }
-
-            netrunner
-                .crawl(CrawlOpts {
-                    print_urls: true,
-                    create_warc: false,
-                })
-                .await?;
-
             Ok(())
         }
         Commands::Clean => {
@@ -144,8 +140,8 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
 
             let archive_path = netrunner
                 .crawl(CrawlOpts {
-                    print_urls: false,
                     create_warc: true,
+                    ..Default::default()
                 })
                 .await?;
 
