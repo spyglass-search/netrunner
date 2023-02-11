@@ -246,6 +246,7 @@ mod test {
     use crate::{bootstrap::Bootstrapper, crawler::http_client, site::SiteInfo};
 
     #[tokio::test]
+    #[ignore = "only used for dev"]
     async fn test_fetch_rss() {
         let bs = Bootstrapper::new(&http_client());
 
