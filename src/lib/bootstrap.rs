@@ -19,8 +19,6 @@ pub struct Bootstrapper {
     client: Client,
     // Urls that need to be processed through a cdx index.
     cdx_queue: HashSet<String>,
-    // Urls gathered from sitemaps + cdx processing.
-    pub to_crawl: HashSet<String>,
 }
 
 impl Default for Bootstrapper {
@@ -34,11 +32,13 @@ impl Bootstrapper {
         Self {
             client: client.clone(),
             cdx_queue: HashSet::new(),
-            to_crawl: HashSet::new(),
         }
     }
 
-    pub async fn find_urls(&mut self, lens: &LensConfig) -> anyhow::Result<()> {
+    pub async fn find_urls(&mut self, lens: &LensConfig) -> anyhow::Result<Vec<String>> {
+        // Urls gathered from sitemaps + cdx processing.
+        let mut to_crawl: HashSet<String> = HashSet::new();
+
         let mut cache = CrawlCache::new();
 
         log::info!("Loading lens rules");
@@ -67,7 +67,7 @@ impl Bootstrapper {
             let url = if prefix.ends_with('$') {
                 // Remove the '$' suffix and add to the crawl queue
                 let url = prefix.trim_end_matches('$');
-                self.to_crawl.insert(url.to_string());
+                to_crawl.insert(url.to_string());
                 continue;
             } else {
                 prefix
@@ -83,15 +83,14 @@ impl Bootstrapper {
         // Third, either read the sitemaps or pull data from a CDX to determine which
         // urls to crawl.
         // ------------------------------------------------------------------------
-        self.process_sitemaps_and_cdx(&mut cache, &allowed, &skipped)
+        self.process_sitemaps_and_cdx(&mut cache, &mut to_crawl, &allowed, &skipped)
             .await;
 
         // Clear CDX queue after fetching URLs.
         self.cdx_queue.clear();
         // Ignore invalid URLs and remove fragments from URLs (e.g. http://example.com#Title
         // is considered the same as http://example.com)
-        self.to_crawl = self
-            .to_crawl
+        let cleaned: Vec<String> = to_crawl
             .iter()
             .filter_map(|url| {
                 if let Ok(mut url) = Url::parse(url) {
@@ -103,26 +102,26 @@ impl Bootstrapper {
             })
             .collect();
 
-        Ok(())
+        Ok(cleaned)
     }
 
     async fn process_sitemaps_and_cdx(
         &mut self,
         cache: &mut CrawlCache,
+        to_crawl: &mut HashSet<String>,
         allowed: &RegexSet,
         skipped: &RegexSet,
     ) {
         // Crawl sitemaps & rss feeds
         for info in cache.cache.values().flatten() {
             // Fetch links from RSS feeds
-            self.to_crawl.extend(self.fetch_rss(info).await);
+            to_crawl.extend(self.fetch_rss(info).await);
 
             // Fetch links from sitemap
             if let Some(robot) = &info.robot {
                 if !robot.sitemaps.is_empty() {
                     for sitemap in &robot.sitemaps {
-                        self.to_crawl
-                            .extend(self.fetch_sitemap(robot, sitemap, allowed, skipped).await);
+                        to_crawl.extend(self.fetch_sitemap(robot, sitemap, allowed, skipped).await);
                     }
                 }
             }
@@ -147,7 +146,7 @@ impl Bootstrapper {
                     .collect::<Vec<String>>();
 
                 log::info!("found {} urls", filtered.len());
-                self.to_crawl.extend(filtered);
+                to_crawl.extend(filtered);
                 if resume.is_none() {
                     break;
                 }

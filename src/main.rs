@@ -115,9 +115,8 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
         Commands::CheckUrls => {
             let lens = _parse_lens(cli).await?;
             let mut bootstrapper = Bootstrapper::default();
-            bootstrapper.find_urls(&lens).await?;
-
-            let mut sorted = bootstrapper.to_crawl.iter().collect::<Vec<_>>();
+            let to_crawl = bootstrapper.find_urls(&lens).await?;
+            let mut sorted = to_crawl.iter().collect::<Vec<_>>();
             sorted.sort();
 
             for url in sorted {

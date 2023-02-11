@@ -99,29 +99,32 @@ impl Netrunner {
     }
 
     pub async fn get_urls(&mut self) -> Vec<String> {
-        let _ = self.bootstrapper.find_urls(&self.lens).await;
-        self.bootstrapper.to_crawl.clone().into_iter().collect()
+        match self.bootstrapper.find_urls(&self.lens).await {
+            Ok(urls) => urls,
+            Err(err) => {
+                log::error!("Unable to get_urls: {err}");
+                Vec::new()
+            }
+        }
     }
 
     /// Kick off a crawl for URLs represented by <lens>.
     pub async fn crawl(&mut self, opts: CrawlOpts) -> Result<Option<ArchiveFiles>> {
-        if !self.state.has_urls {
-            self.bootstrapper.find_urls(&self.lens).await?;
+        let crawl_queue = if !self.state.has_urls {
+            self.bootstrapper.find_urls(&self.lens).await?
         } else {
             log::info!("Already collected URLs, skipping");
             // Load urls from file
             let file = std::fs::read_to_string(self.url_txt_path())?;
-            self.bootstrapper
-                .to_crawl
-                .extend(file.lines().map(|x| x.to_string()).collect::<Vec<String>>());
-        }
+            file.lines().map(|x| x.to_string()).collect::<Vec<String>>()
+        };
 
         if opts.create_warc {
             // CRAWL BABY CRAWL
             // Default to max 2 requests per second for a domain.
             let quota = Quota::per_second(nonzero!(2u32));
             let tmp_storage = tmp_storage_path(&self.lens);
-            self.crawl_loop(&tmp_storage, quota).await?;
+            self.crawl_loop(&crawl_queue, &tmp_storage, quota).await?;
             let archives =
                 create_archives(&self.storage, &self.cached_records(&tmp_storage)).await?;
             return Ok(Some(archives));
@@ -134,10 +137,9 @@ impl Netrunner {
         &mut self,
         url: String,
     ) -> Result<Vec<(ArchiveRecord, Option<ParseResult>)>> {
-        self.bootstrapper.to_crawl.insert(url);
         let quota = Quota::per_second(nonzero!(2u32));
         let tmp_storage = tmp_storage_path(&self.lens);
-        self.crawl_loop(&tmp_storage, quota).await?;
+        self.crawl_loop(&[url], &tmp_storage, quota).await?;
         let archived = self.cached_records(&tmp_storage);
 
         let mut records = Vec::new();
@@ -195,12 +197,15 @@ impl Netrunner {
     }
 
     /// Web Archive (WARC) file format definition: https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1
-    async fn crawl_loop(&mut self, tmp_storage: &PathBuf, quota: Quota) -> anyhow::Result<()> {
+    async fn crawl_loop(
+        &mut self,
+        crawl_queue: &[String],
+        tmp_storage: &PathBuf,
+        quota: Quota,
+    ) -> anyhow::Result<()> {
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
-        let to_crawl = &self.bootstrapper.to_crawl;
-
         let progress = Arc::new(AtomicUsize::new(0));
-        let total = to_crawl.len();
+        let total = crawl_queue.len();
         let mut already_crawled: HashSet<String> = HashSet::new();
 
         // Before we begin, check to see if we've already crawled anything
@@ -217,7 +222,7 @@ impl Netrunner {
         progress.store(already_crawled.len(), Ordering::SeqCst);
 
         // Spin up tasks to crawl through everything
-        for url in to_crawl.iter().filter_map(|url| Url::parse(url).ok()) {
+        for url in crawl_queue.iter().filter_map(|url| Url::parse(url).ok()) {
             if already_crawled.contains(&url.to_string()) {
                 log::info!("-> skipping {}, already crawled", url);
                 continue;
