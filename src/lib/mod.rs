@@ -1,29 +1,20 @@
-use std::io::Write;
+use anyhow::Result;
+use bootstrap::Bootstrapper;
+use governor::{Quota, RateLimiter};
+use nonzero_ext::nonzero;
+use parser::ParseResult;
+use reqwest::Client;
+use spyglass_lens::LensConfig;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
-use std::{collections::HashSet, io::Read};
-
-use anyhow::Result;
-use async_recursion::async_recursion;
-use bytes::buf::Buf;
-use feedfinder::FeedType;
-use flate2::read::GzDecoder;
-use governor::{Quota, RateLimiter};
-use nonzero_ext::nonzero;
-use parser::ParseResult;
-use regex::{RegexSet, RegexSetBuilder};
-use reqwest::Client;
-use rss::Channel;
-use site::SiteInfo;
-use sitemap::reader::{SiteMapEntity, SiteMapReader};
-use spyglass_lens::LensConfig;
-use texting_robots::Robot;
 use url::Url;
 
 pub mod archive;
+pub mod bootstrap;
 mod cache;
 mod cdx;
 mod crawler;
@@ -34,14 +25,21 @@ pub mod validator;
 
 use crate::crawler::{handle_crawl, http_client};
 use archive::{create_archives, ArchiveFiles, ArchiveRecord};
-use cache::CrawlCache;
 
 static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"));
 
-#[derive(Default)]
 pub struct CrawlOpts {
-    pub print_urls: bool,
     pub create_warc: bool,
+    pub requests_per_second: u32,
+}
+
+impl Default for CrawlOpts {
+    fn default() -> Self {
+        Self {
+            create_warc: false,
+            requests_per_second: 2,
+        }
+    }
 }
 
 pub fn cache_storage_path(lens: &LensConfig) -> PathBuf {
@@ -71,12 +69,9 @@ pub struct NetrunnerState {
 
 #[derive(Clone)]
 pub struct Netrunner {
+    bootstrapper: Bootstrapper,
     client: Client,
     lens: LensConfig,
-    // Urls that need to be processed through a cdx index.
-    cdx_queue: HashSet<String>,
-    // Urls gathered from sitemaps + cdx processing.
-    to_crawl: HashSet<String>,
     // Where the cached web archive will be storage
     pub storage: PathBuf,
     pub state: NetrunnerState,
@@ -84,19 +79,18 @@ pub struct Netrunner {
 
 impl Netrunner {
     pub fn new(lens: LensConfig) -> Self {
-        let client = http_client();
         let storage = cache_storage_path(&lens);
         let state = NetrunnerState {
             has_urls: storage.join("urls.txt").exists(),
         };
+        let client = http_client();
 
         Netrunner {
+            bootstrapper: Bootstrapper::new(&client),
             client,
             lens,
             storage,
             state,
-            cdx_queue: Default::default(),
-            to_crawl: Default::default(),
         }
     }
 
@@ -105,106 +99,32 @@ impl Netrunner {
     }
 
     pub async fn get_urls(&mut self) -> Vec<String> {
-        let _rslt = self
-            .crawl(CrawlOpts {
-                print_urls: false,
-                create_warc: false,
-            })
-            .await;
-
-        self.to_crawl.clone().into_iter().collect()
+        match self.bootstrapper.find_urls(&self.lens).await {
+            Ok(urls) => urls,
+            Err(err) => {
+                log::error!("Unable to get_urls: {err}");
+                Vec::new()
+            }
+        }
     }
 
     /// Kick off a crawl for URLs represented by <lens>.
     pub async fn crawl(&mut self, opts: CrawlOpts) -> Result<Option<ArchiveFiles>> {
-        let mut cache = CrawlCache::new();
-        // ------------------------------------------------------------------------
-        // First, build filters based on the lens. This will be used to filter out
-        // urls from sitemaps / cdx indexes
-        // ------------------------------------------------------------------------
-        log::info!("Loading lens rules");
-        let filters = self.lens.into_regexes();
-        let allowed = RegexSetBuilder::new(filters.allowed)
-            .size_limit(100_000_000)
-            .build()?;
-        let skipped = RegexSetBuilder::new(filters.skipped)
-            .size_limit(100_000_000)
-            .build()?;
-
-        // ------------------------------------------------------------------------
-        // Second, we fetch robots & sitemaps from the domains/urls represented by the lens
-        // ------------------------------------------------------------------------
-        log::info!("Fetching robots.txt & sitemaps.xml");
-        for domain in self.lens.domains.iter() {
-            let domain_url = format!("http://{domain}");
-            // If there are no sitemaps, add to CDX queue
-            if !cache.process_url(&domain_url).await {
-                self.cdx_queue.insert(domain_url);
-            }
-        }
-
-        for prefix in self.lens.urls.iter() {
-            let url = if prefix.ends_with('$') {
-                // Remove the '$' suffix and add to the crawl queue
-                let url = prefix.trim_end_matches('$');
-                self.to_crawl.insert(url.to_string());
-                continue;
-            } else {
-                prefix
-            };
-
-            // If there is no sitemaps in the robots, add to CDX queue
-            if !cache.process_url(url).await {
-                self.cdx_queue.insert(url.to_owned());
-            }
-        }
-
-        // ------------------------------------------------------------------------
-        // Third, either read the sitemaps or pull data from a CDX to determine which
-        // urls to crawl.
-        // ------------------------------------------------------------------------
-        if !self.state.has_urls {
-            self.fetch_urls(&cache, &allowed, &skipped).await;
+        let crawl_queue = if !self.state.has_urls {
+            self.bootstrapper.find_urls(&self.lens).await?
         } else {
             log::info!("Already collected URLs, skipping");
             // Load urls from file
             let file = std::fs::read_to_string(self.url_txt_path())?;
-            self.to_crawl
-                .extend(file.lines().map(|x| x.to_string()).collect::<Vec<String>>());
-        }
-
-        // Clear CDX queue after fetching URLs.
-        self.cdx_queue.clear();
-        // Ignore invalid URLs and remove fragments from URLs (e.g. http://example.com#Title
-        // is considered the same as http://example.com)
-        self.to_crawl = self
-            .to_crawl
-            .iter()
-            .filter_map(|url| {
-                if let Ok(mut url) = Url::parse(url) {
-                    url.set_fragment(None);
-                    Some(url.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        if opts.print_urls {
-            let mut sorted_urls = self.to_crawl.clone().into_iter().collect::<Vec<String>>();
-            sorted_urls.sort();
-            for url in &sorted_urls {
-                println!("{url}");
-            }
-            eprintln!("Discovered {} urls for lens", sorted_urls.len());
-        }
+            file.lines().map(|x| x.to_string()).collect::<Vec<String>>()
+        };
 
         if opts.create_warc {
             // CRAWL BABY CRAWL
             // Default to max 2 requests per second for a domain.
             let quota = Quota::per_second(nonzero!(2u32));
             let tmp_storage = tmp_storage_path(&self.lens);
-            self.crawl_loop(&tmp_storage, quota).await?;
+            self.crawl_loop(&crawl_queue, &tmp_storage, quota).await?;
             let archives =
                 create_archives(&self.storage, &self.cached_records(&tmp_storage)).await?;
             return Ok(Some(archives));
@@ -217,10 +137,9 @@ impl Netrunner {
         &mut self,
         url: String,
     ) -> Result<Vec<(ArchiveRecord, Option<ParseResult>)>> {
-        self.to_crawl.insert(url);
         let quota = Quota::per_second(nonzero!(2u32));
         let tmp_storage = tmp_storage_path(&self.lens);
-        self.crawl_loop(&tmp_storage, quota).await?;
+        self.crawl_loop(&[url], &tmp_storage, quota).await?;
         let archived = self.cached_records(&tmp_storage);
 
         let mut records = Vec::new();
@@ -278,11 +197,15 @@ impl Netrunner {
     }
 
     /// Web Archive (WARC) file format definition: https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1
-    async fn crawl_loop(&mut self, tmp_storage: &PathBuf, quota: Quota) -> anyhow::Result<()> {
+    async fn crawl_loop(
+        &mut self,
+        crawl_queue: &[String],
+        tmp_storage: &PathBuf,
+        quota: Quota,
+    ) -> anyhow::Result<()> {
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
-
         let progress = Arc::new(AtomicUsize::new(0));
-        let total = self.to_crawl.len();
+        let total = crawl_queue.len();
         let mut already_crawled: HashSet<String> = HashSet::new();
 
         // Before we begin, check to see if we've already crawled anything
@@ -299,14 +222,14 @@ impl Netrunner {
         progress.store(already_crawled.len(), Ordering::SeqCst);
 
         // Spin up tasks to crawl through everything
-        for url in self.to_crawl.iter().filter_map(|url| Url::parse(url).ok()) {
+        for url in crawl_queue.iter().filter_map(|url| Url::parse(url).ok()) {
             if already_crawled.contains(&url.to_string()) {
                 log::info!("-> skipping {}, already crawled", url);
                 continue;
             }
 
             let progress = progress.clone();
-            handle_crawl(&http_client(), tmp_storage.clone(), lim.clone(), &url).await;
+            handle_crawl(&self.client, tmp_storage.clone(), lim.clone(), &url).await;
             let old_val = progress.fetch_add(1, Ordering::SeqCst);
             if old_val % 100 == 0 {
                 log::info!("progress: {} / {}", old_val, total)
@@ -314,149 +237,6 @@ impl Netrunner {
         }
 
         Ok(())
-    }
-
-    async fn fetch_rss(&self, info: &SiteInfo) -> Vec<String> {
-        let mut feed_urls: Vec<String> = Vec::new();
-
-        for feed in &info.feeds {
-            match feed.feed_type() {
-                FeedType::Atom | FeedType::Rss => {
-                    if let Ok(resp) = reqwest::get(feed.url().to_string()).await {
-                        if let Ok(content) = resp.bytes().await {
-                            if let Ok(channel) = Channel::read_from(&content[..]) {
-                                for item in channel.items {
-                                    if let Some(link) = item.link {
-                                        feed_urls.push(link);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        feed_urls
-    }
-
-    /// Fetch and parse a sitemap file
-    #[async_recursion]
-    async fn fetch_sitemap(
-        &self,
-        robot: &Robot,
-        sitemap_url: &str,
-        allowed: &RegexSet,
-        skipped: &RegexSet,
-    ) -> Vec<String> {
-        log::debug!("fetching sitemap: {}", sitemap_url);
-        let mut urls = Vec::new();
-
-        if let Ok(resp) = self.client.get(sitemap_url).send().await {
-            if resp.status().is_success() {
-                let mut buf = String::new();
-                // Decode gzipped files. Doesn't work automatically if they were
-                // gzipped before uploading it to their destination.
-                if sitemap_url.ends_with(".gz") {
-                    if let Ok(text) = resp.bytes().await {
-                        let mut decoder = GzDecoder::new(text.reader());
-                        decoder.read_to_string(&mut buf).unwrap();
-                    }
-                } else if let Ok(text) = resp.text().await {
-                    buf = text.replace('\u{feff}', "");
-                }
-
-                let parser = SiteMapReader::new(buf.as_bytes());
-                for entity in parser {
-                    match entity {
-                        SiteMapEntity::Url(url_entry) => {
-                            if let Some(loc) = url_entry.loc.get_url() {
-                                let url = loc.to_string();
-                                if robot.allowed(&url)
-                                    && allowed.is_match(&url)
-                                    && !skipped.is_match(&url)
-                                {
-                                    urls.push(url);
-                                }
-                            }
-                        }
-                        SiteMapEntity::SiteMap(sitemap_entry) => {
-                            if let Some(loc) = sitemap_entry.loc.get_url() {
-                                urls.extend(
-                                    self.fetch_sitemap(robot, loc.as_str(), allowed, skipped)
-                                        .await,
-                                );
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        log::info!("found {} urls for {}", urls.len(), sitemap_url);
-        urls
-    }
-
-    pub async fn fetch_urls(&mut self, cache: &CrawlCache, allowed: &RegexSet, skipped: &RegexSet) {
-        // Crawl sitemaps & rss feeds
-        for info in cache.cache.values().flatten() {
-            // Fetch links from RSS feeds
-            self.to_crawl.extend(self.fetch_rss(info).await);
-
-            // Fetch links from sitemap
-            if let Some(robot) = &info.robot {
-                if !robot.sitemaps.is_empty() {
-                    for sitemap in &robot.sitemaps {
-                        self.to_crawl
-                            .extend(self.fetch_sitemap(robot, sitemap, allowed, skipped).await);
-                    }
-                }
-            }
-        }
-
-        // Process any URLs in the cdx queue
-        for prefix in self.cdx_queue.iter() {
-            let mut resume_key = None;
-            log::debug!("fetching cdx for: {}", prefix);
-            while let Ok((urls, resume)) =
-                cdx::fetch_cdx(&self.client, prefix, 1000, resume_key.clone()).await
-            {
-                let filtered = urls
-                    .into_iter()
-                    .filter(|url| {
-                        if allowed.is_match(url) && !skipped.is_match(url) {
-                            return true;
-                        }
-
-                        false
-                    })
-                    .collect::<Vec<String>>();
-
-                log::info!("found {} urls", filtered.len());
-                self.to_crawl.extend(filtered);
-                if resume.is_none() {
-                    break;
-                }
-
-                resume_key = resume;
-            }
-        }
-
-        // Write out URLs to crawl folder
-        let mut file = std::fs::File::create(self.url_txt_path()).expect("create failed");
-
-        let mut sorted = self
-            .to_crawl
-            .iter()
-            .map(|x| x.to_string())
-            .collect::<Vec<String>>();
-        sorted.sort();
-
-        for url in sorted {
-            let _ = file.write(format!("{url}\n").as_bytes());
-        }
     }
 }
 
@@ -468,9 +248,7 @@ mod test {
     use tracing_log::LogTracer;
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    use crate::{
-        parser::ParseResult, site::SiteInfo, validator::validate_lens, CrawlOpts, Netrunner,
-    };
+    use crate::{parser::ParseResult, validator::validate_lens, CrawlOpts, Netrunner};
 
     #[tokio::test]
     #[ignore]
@@ -495,8 +273,8 @@ mod test {
         let mut netrunner = Netrunner::new(lens.clone());
         let archives = netrunner
             .crawl(CrawlOpts {
-                print_urls: false,
                 create_warc: true,
+                ..Default::default()
             })
             .await
             .expect("Unable to crawl");
@@ -517,23 +295,5 @@ mod test {
             eprintln!("Failed validation: {err}");
             panic!("Failed");
         }
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_fetch_rss() {
-        let lens = LensConfig {
-            author: "test".to_string(),
-            name: "test".to_string(),
-            domains: vec!["atp.fm".to_string()],
-            ..Default::default()
-        };
-
-        let netrunner = Netrunner::new(lens);
-        let info = SiteInfo::new("atp.fm")
-            .await
-            .expect("unable to create siteinfo");
-        let feed_urls = netrunner.fetch_rss(&info).await;
-        assert_eq!(feed_urls.len(), 515);
     }
 }
