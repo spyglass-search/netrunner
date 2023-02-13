@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio_retry::strategy::ExponentialBackoff;
-use tokio_retry::Retry;
+use tokio_retry::RetryIf;
 
 use crate::archive::ArchiveRecord;
 use crate::cdx::create_archive_url;
@@ -42,6 +42,21 @@ pub fn http_client() -> Client {
         .expect("Unable to create HTTP client")
 }
 
+/// Checks to see if we should retry a FetchError based on legitimate issues versus
+/// something like a 404 or 403 which would happen everytime.
+fn should_retry(e: &FetchError) -> bool {
+    match e {
+        FetchError::HttpError(err) => {
+            if let Some(status_code) = err.status() {
+                status_code.as_u16() != 403 || status_code != 404
+            } else {
+                true
+            }
+        }
+        _ => true,
+    }
+}
+
 /// Handles crawling a url.
 pub async fn handle_crawl(
     client: &Client,
@@ -59,13 +74,18 @@ pub async fn handle_crawl(
         .take(3);
 
     // Retry if we run into 429 / timeout errors
-    let web_archive = Retry::spawn(retry_strat.clone(), || async {
-        log::info!("trying to fetch from IA");
-        // Wait for when we can crawl this based on the domain
-        lim.until_key_ready(&domain.to_string()).await;
-        fetch_page(client, &ia_url, Some(url.to_string()), tmp_storage.clone()).await
-    })
+    let web_archive = RetryIf::spawn(
+        retry_strat.clone(),
+        || async {
+            log::info!("trying to fetch from IA");
+            // Wait for when we can crawl this based on the domain
+            lim.until_key_ready(&domain.to_string()).await;
+            fetch_page(client, &ia_url, Some(url.to_string()), tmp_storage.clone()).await
+        },
+        should_retry,
+    )
     .await;
+
     // If we fail trying to get the page from the web archive, hit the
     // site directly.
     if web_archive.is_err() {
@@ -73,12 +93,16 @@ pub async fn handle_crawl(
             .max_delay(Duration::from_secs(5))
             .take(3);
 
-        Retry::spawn(retry_strat, || async {
-            log::info!("trying to fetch from origin");
-            // Wait for when we can crawl this based on the domain
-            lim.until_key_ready(&domain.to_string()).await;
-            fetch_page(client, url.as_ref(), None, tmp_storage.clone()).await
-        })
+        RetryIf::spawn(
+            retry_strat,
+            || async {
+                log::info!("trying to fetch from origin");
+                // Wait for when we can crawl this based on the domain
+                lim.until_key_ready(&domain.to_string()).await;
+                fetch_page(client, url.as_ref(), None, tmp_storage.clone()).await
+            },
+            should_retry,
+        )
         .await
     } else {
         Ok(web_archive.unwrap())
