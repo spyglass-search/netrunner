@@ -48,7 +48,7 @@ fn should_retry(e: &FetchError) -> bool {
     match e {
         FetchError::HttpError(err) => {
             if let Some(status_code) = err.status() {
-                status_code.as_u16() != 403 || status_code != 404
+                status_code.as_u16() != 403 && status_code != 404
             } else {
                 true
             }
