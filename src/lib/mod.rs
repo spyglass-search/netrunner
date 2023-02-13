@@ -17,7 +17,7 @@ pub mod archive;
 pub mod bootstrap;
 mod cache;
 mod cdx;
-mod crawler;
+pub mod crawler;
 pub mod parser;
 pub mod s3;
 pub mod site;
@@ -229,7 +229,7 @@ impl Netrunner {
             }
 
             let progress = progress.clone();
-            handle_crawl(&self.client, tmp_storage.clone(), lim.clone(), &url).await;
+            handle_crawl(&self.client, Some(tmp_storage.clone()), lim.clone(), &url).await;
             let old_val = progress.fetch_add(1, Ordering::SeqCst);
             if old_val % 100 == 0 {
                 log::info!("progress: {} / {}", old_val, total)

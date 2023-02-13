@@ -4,7 +4,7 @@ use governor::RateLimiter;
 use reqwest::{Client, StatusCode};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_retry::strategy::ExponentialBackoff;
@@ -29,9 +29,10 @@ pub fn http_client() -> Client {
         .expect("Unable to create HTTP client")
 }
 
+/// Handles crawling a url.
 pub async fn handle_crawl(
     client: &Client,
-    tmp_storage: PathBuf,
+    tmp_storage: Option<PathBuf>,
     lim: Arc<RateLimit>,
     url: &url::Url,
 ) {
@@ -49,7 +50,7 @@ pub async fn handle_crawl(
         log::info!("trying to fetch from IA");
         // Wait for when we can crawl this based on the domain
         lim.until_key_ready(&domain.to_string()).await;
-        fetch_page(client, &ia_url, Some(url.to_string()), &tmp_storage).await
+        fetch_page(client, &ia_url, Some(url.to_string()), tmp_storage.clone()).await
     })
     .await;
     // If we fail trying to get the page from the web archive, hit the
@@ -62,7 +63,7 @@ pub async fn handle_crawl(
             log::info!("trying to fetch from origin");
             // Wait for when we can crawl this based on the domain
             lim.until_key_ready(&domain.to_string()).await;
-            fetch_page(client, url.as_ref(), None, &tmp_storage).await
+            fetch_page(client, url.as_ref(), None, tmp_storage.clone()).await
         })
         .await;
     }
@@ -72,8 +73,8 @@ async fn fetch_page(
     client: &Client,
     url: &str,
     url_override: Option<String>,
-    page_store: &Path,
-) -> Result<(), ()> {
+    page_store: Option<PathBuf>,
+) -> Result<ArchiveRecord, ()> {
     // Wait for when we can crawl this based on the domain
     match client.get(url).send().await {
         Ok(resp) => {
@@ -98,21 +99,25 @@ async fn fetch_page(
                 log::error!("Unable to fetch [{:?}] {} - {}", err.status(), url, err);
                 Err(())
             } else {
-                log::info!("fetched {}: {}", resp.status(), url);
-                // Save response to tmp storage
-                if let Ok(record) = ArchiveRecord::from_response(resp, url_override).await {
-                    if let Ok(serialized) = ron::to_string(&record) {
-                        // Hash the URL to store in the cache
-                        let mut hasher = DefaultHasher::new();
-                        record.url.hash(&mut hasher);
-                        let id = hasher.finish().to_string();
-                        let file = page_store.join(id);
-                        let _ = std::fs::write(file.clone(), serialized);
-                        log::debug!("cached <{}> -> <{}>", record.url, file.display());
+                match ArchiveRecord::from_response(resp, url_override).await {
+                    Ok(record) => {
+                        if let Some(page_store) = page_store {
+                            if let Ok(serialized) = ron::to_string(&record) {
+                                let mut hasher = DefaultHasher::new();
+                                record.url.hash(&mut hasher);
+                                let id = hasher.finish().to_string();
+                                let file = page_store.join(id);
+                                let _ = std::fs::write(file.clone(), serialized);
+                                log::debug!("cached <{}> -> <{}>", record.url, file.display());
+                            }
+                        }
+                        Ok(record)
+                    }
+                    Err(err) => {
+                        log::error!("Unable to create ArchiveRecord: {err}");
+                        Err(())
                     }
                 }
-
-                Ok(())
             }
         }
         Err(err) => {
@@ -159,6 +164,6 @@ mod test {
         )
         .expect("Invalid URL");
 
-        handle_crawl(&client, path.to_path_buf(), lim.clone(), &url).await;
+        handle_crawl(&client, None, lim.clone(), &url).await;
     }
 }
