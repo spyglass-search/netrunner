@@ -228,8 +228,13 @@ impl Netrunner {
                 continue;
             }
 
+            if let Err(err) =
+                handle_crawl(&self.client, Some(tmp_storage.clone()), lim.clone(), &url).await
+            {
+                log::error!("Unable to crawl {} - {err}", &url);
+            }
+
             let progress = progress.clone();
-            handle_crawl(&self.client, Some(tmp_storage.clone()), lim.clone(), &url).await;
             let old_val = progress.fetch_add(1, Ordering::SeqCst);
             if old_val % 100 == 0 {
                 log::info!("progress: {} / {}", old_val, total)
