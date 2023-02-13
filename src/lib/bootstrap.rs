@@ -56,7 +56,8 @@ impl Bootstrapper {
         // ------------------------------------------------------------------------
         log::info!("Fetching robots.txt & sitemaps.xml");
         for domain in lens.domains.iter() {
-            let domain_url = format!("http://{domain}");
+            let domain_url = format!("http://{domain}/");
+            to_crawl.insert(domain_url.to_string());
             // If there are no sitemaps, add to CDX queue
             if !cache.process_url(&domain_url).await {
                 self.cdx_queue.insert(domain_url);
@@ -70,6 +71,7 @@ impl Bootstrapper {
                 to_crawl.insert(url.to_string());
                 continue;
             } else {
+                to_crawl.insert(prefix.clone());
                 prefix
             };
 
@@ -90,7 +92,7 @@ impl Bootstrapper {
         self.cdx_queue.clear();
         // Ignore invalid URLs and remove fragments from URLs (e.g. http://example.com#Title
         // is considered the same as http://example.com)
-        let cleaned: Vec<String> = to_crawl
+        let cleaned: HashSet<String> = to_crawl
             .iter()
             .filter_map(|url| {
                 if let Ok(mut url) = Url::parse(&url) {
@@ -102,7 +104,7 @@ impl Bootstrapper {
             })
             .collect();
 
-        Ok(cleaned)
+        Ok(cleaned.into_iter().collect())
     }
 
     async fn process_sitemaps_and_cdx(
