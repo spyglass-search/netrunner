@@ -86,6 +86,8 @@ fn filter_text_nodes(root: &NodeRef<Node>, doc: &mut String, links: &mut HashSet
 
     let href_key = QualName::new(None, ns!(), local_name!("href"));
     let role_key = QualName::new(None, ns!(), local_name!("role"));
+    let rel_key = QualName::new(None, ns!(), local_name!("rel"));
+
     let mut noindex_skip = false;
 
     for child in root.children() {
@@ -126,8 +128,17 @@ fn filter_text_nodes(root: &NodeRef<Node>, doc: &mut String, links: &mut HashSet
             // Save links
             if element.name() == "a" && element.attrs.contains_key(&href_key) {
                 let href = element.attrs.get(&href_key).unwrap().to_string();
+                let rel = if let Some(rel) = element.attrs.get(&rel_key) {
+                    rel.to_string().to_lowercase()
+                } else {
+                    "follow".to_string()
+                };
+
                 // Ignore anchor links
-                if !href.starts_with('#') {
+                if !href.starts_with('#')
+                    // ignore rels that tell us this link is not relevant
+                    && rel != "nofollow" && rel != "external"
+                {
                     links.insert(href.to_string());
                 }
             } else if element.name() == "br" && !doc.ends_with(' ') {
