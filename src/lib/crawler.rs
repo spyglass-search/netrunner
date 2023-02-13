@@ -7,6 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use thiserror::Error;
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::Retry;
 
@@ -17,6 +18,18 @@ static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"
 const RETRY_DELAY_MS: u64 = 5000;
 
 type RateLimit = RateLimiter<String, DashMapStateStore<String>, QuantaClock>;
+
+#[derive(Error, Debug)]
+pub enum FetchError {
+    #[error("Unable to create ArchiveRecord")]
+    ArchiveError,
+    #[error("Too Many Requests")]
+    TooManyRequests,
+    #[error("HTTP status error: {0}")]
+    HttpError(reqwest::Error),
+    #[error("Request error: {0}")]
+    RequestError(reqwest::Error),
+}
 
 pub fn http_client() -> Client {
     // Use a normal user-agent otherwise some sites won't let us crawl
@@ -35,7 +48,7 @@ pub async fn handle_crawl(
     tmp_storage: Option<PathBuf>,
     lim: Arc<RateLimit>,
     url: &url::Url,
-) {
+) -> anyhow::Result<ArchiveRecord, FetchError> {
     // URL to Wayback Machine
     let ia_url = create_archive_url(url.as_ref());
 
@@ -59,13 +72,16 @@ pub async fn handle_crawl(
         let retry_strat = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(5))
             .take(3);
-        let _ = Retry::spawn(retry_strat, || async {
+
+        Retry::spawn(retry_strat, || async {
             log::info!("trying to fetch from origin");
             // Wait for when we can crawl this based on the domain
             lim.until_key_ready(&domain.to_string()).await;
             fetch_page(client, url.as_ref(), None, tmp_storage.clone()).await
         })
-        .await;
+        .await
+    } else {
+        Ok(web_archive.unwrap())
     }
 }
 
@@ -74,7 +90,7 @@ async fn fetch_page(
     url: &str,
     url_override: Option<String>,
     page_store: Option<PathBuf>,
-) -> Result<ArchiveRecord, ()> {
+) -> anyhow::Result<ArchiveRecord, FetchError> {
     // Wait for when we can crawl this based on the domain
     match client.get(url).send().await {
         Ok(resp) => {
@@ -94,10 +110,10 @@ async fn fetch_page(
                 log::info!("429 received... retrying after {}ms", retry_after_ms);
                 tokio::time::sleep(tokio::time::Duration::from_millis(retry_after_ms)).await;
 
-                Err(())
+                Err(FetchError::TooManyRequests)
             } else if let Err(err) = resp.error_for_status_ref() {
                 log::error!("Unable to fetch [{:?}] {} - {}", err.status(), url, err);
-                Err(())
+                Err(FetchError::HttpError(err))
             } else {
                 match ArchiveRecord::from_response(resp, url_override).await {
                     Ok(record) => {
@@ -115,14 +131,14 @@ async fn fetch_page(
                     }
                     Err(err) => {
                         log::error!("Unable to create ArchiveRecord: {err}");
-                        Err(())
+                        Err(FetchError::ArchiveError)
                     }
                 }
             }
         }
         Err(err) => {
             log::error!("Unable to fetch [{:?}] {} - {}", err.status(), url, err);
-            Err(())
+            Err(FetchError::RequestError(err))
         }
     }
 }
@@ -133,7 +149,7 @@ mod test {
     use governor::{Quota, RateLimiter};
     use nonzero_ext::nonzero;
     use std::io;
-    use std::{path::Path, sync::Arc};
+    use std::sync::Arc;
     use tracing_log::LogTracer;
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::{fmt, prelude::__tracing_subscriber_SubscriberExt};
@@ -154,7 +170,6 @@ mod test {
         LogTracer::init().expect("Unable to create logger");
 
         let client = http_client();
-        let path = Path::new("/tmp");
         let quota = Quota::per_second(nonzero!(2u32));
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
 
@@ -164,6 +179,6 @@ mod test {
         )
         .expect("Invalid URL");
 
-        handle_crawl(&client, None, lim.clone(), &url).await;
+        assert!(handle_crawl(&client, None, lim.clone(), &url).await.is_ok());
     }
 }

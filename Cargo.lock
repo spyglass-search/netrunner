@@ -2135,6 +2135,7 @@ dependencies = [
  "spyglass-lens",
  "tendril",
  "texting_robots",
+ "thiserror",
  "tokio",
  "tokio-retry",
  "tracing",
