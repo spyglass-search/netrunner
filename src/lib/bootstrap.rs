@@ -11,12 +11,12 @@ use reqwest::Client;
 use rss::Channel;
 use sitemap::reader::{SiteMapEntity, SiteMapReader};
 use spyglass_lens::LensConfig;
-use tokio_retry::RetryIf;
-use tokio_retry::strategy::ExponentialBackoff;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashSet, io::Read};
 use tokio::task::JoinSet;
+use tokio_retry::strategy::ExponentialBackoff;
+use tokio_retry::RetryIf;
 use url::Url;
 
 use super::cdx;
@@ -227,7 +227,6 @@ async fn fetch_sitemap(
     let mut urls: HashSet<String> = HashSet::new();
     let client = http_client();
 
-
     let retry_strat = ExponentialBackoff::from_millis(100)
         .max_delay(Duration::from_secs(5))
         .take(3);
@@ -249,8 +248,9 @@ async fn fetch_sitemap(
             }
 
             true
-        }
-    ).await;
+        },
+    )
+    .await;
 
     match response {
         Ok(resp) => {
