@@ -17,7 +17,7 @@ use crate::cdx::create_archive_url;
 static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"));
 const RETRY_DELAY_MS: u64 = 5000;
 
-type RateLimit = RateLimiter<String, DashMapStateStore<String>, QuantaClock>;
+pub type RateLimit = RateLimiter<String, DashMapStateStore<String>, QuantaClock>;
 
 #[derive(Error, Debug)]
 pub enum FetchError {
