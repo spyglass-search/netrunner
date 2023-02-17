@@ -451,6 +451,7 @@ async fn process_site_map(
 
 // Requests the sitemap
 async fn get_sitemap(sitemap_url: &Url, limiter: &Arc<RateLimit>) -> Result<Response, Error> {
+    log::debug!("Getting sitemap from website {:?}", sitemap_url);
     let client = http_client();
 
     let retry_strat = ExponentialBackoff::from_millis(100)
