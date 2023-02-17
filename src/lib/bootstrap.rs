@@ -483,6 +483,7 @@ async fn get_sitemap(sitemap_url: &Url, limiter: &Arc<RateLimit>) -> Result<Resp
 fn get_cached_sitemap(sitemap_url: &Url) -> Option<String> {
     if let Some(domain) = sitemap_url.domain() {
         let site_cache = get_cache_location(domain);
+        log::debug!("Checking if cache exists {:?}", site_cache);
         if site_cache.exists() {
             let tar_gz = std::fs::File::open(site_cache).unwrap();
             let tar = GzDecoder::new(tar_gz);
@@ -491,10 +492,14 @@ fn get_cached_sitemap(sitemap_url: &Url) -> Option<String> {
             if let Ok(entries) = archive.entries() {
                 for mut entry in entries.flatten() {
                     if let Ok(path) = entry.path() {
+                        log::debug!("Checking entry {:?} vs {:?}", path, site_path);
                         if path.display().to_string().eq(site_path) {
                             let mut buf = String::new();
                             match entry.read_to_string(&mut buf) {
-                                Ok(_) => return Some(buf),
+                                Ok(_) => {
+                                    log::debug!("Got cached map");
+                                    return Some(buf)
+                                },
                                 Err(err) => log::warn!("Error reading cache file {:?}", err),
                             }
                         }
