@@ -64,7 +64,7 @@ impl Bootstrapper {
             self.cdx_queue.insert(domain_url);
         }
 
-        let site_cache = get_cache_location(domain);
+        let site_cache = get_cache_location_archive(domain);
         let tar_gz = std::fs::File::create(site_cache.clone()).unwrap();
 
         let tar = GzEncoder::new(tar_gz, Compression::default());
