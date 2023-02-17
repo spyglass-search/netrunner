@@ -2,9 +2,9 @@ use async_recursion::async_recursion;
 use bytes::Buf;
 use dashmap::DashSet;
 use feedfinder::FeedType;
-use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use flate2::Compression;
 use governor::Quota;
 use governor::RateLimiter;
 use nonzero_ext::nonzero;
@@ -15,24 +15,24 @@ use reqwest::Response;
 use rss::Channel;
 use sitemap::reader::{SiteMapEntity, SiteMapReader};
 use spyglass_lens::LensConfig;
-use tar::Builder;
-use tar::Header;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashSet, io::Read};
+use tar::Archive;
+use tar::Builder;
+use tar::Header;
 use tokio::task::JoinSet;
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::RetryIf;
 use url::Url;
-use tar::Archive;
 
 use super::cdx;
 use super::crawler::RateLimit;
-use crate::site;
 use crate::{cache::CrawlCache, crawler::http_client, site::SiteInfo};
 
+// Sitemap Cache directory
 const SITE_CACHE_DIR: &str = "sitemaps/";
 
 #[derive(Clone)]
@@ -56,6 +56,7 @@ impl Bootstrapper {
         }
     }
 
+    /// Generates a sitemap cache for the specified domain
     pub async fn cache_sitemaps(&mut self, domain: &str) -> anyhow::Result<()> {
         let mut cache = CrawlCache::new();
         let domain_url = format!("http://{domain}/");
@@ -64,9 +65,8 @@ impl Bootstrapper {
         }
 
         let site_cache = get_cache_location(domain);
-        let tar_gz =
-            std::fs::File::create(site_cache).unwrap();
-        
+        let tar_gz = std::fs::File::create(site_cache).unwrap();
+
         let tar = GzEncoder::new(tar_gz, Compression::default());
         let mut builder = Builder::new(tar);
 
@@ -148,10 +148,11 @@ impl Bootstrapper {
         Ok(cleaned.into_iter().collect())
     }
 
+    // Helper method used to cache all the sitemaps for a single domain
     async fn cache_all_sitemaps(
         &self,
         cache: &CrawlCache,
-        builder: &mut Builder<GzEncoder<std::fs::File>>
+        builder: &mut Builder<GzEncoder<std::fs::File>>,
     ) {
         let mut sitemaps = Vec::new();
 
@@ -177,7 +178,6 @@ impl Bootstrapper {
                     cache_sitemap(lim.clone(), &url, builder).await
                 }
             }
-           
         }
     }
 
@@ -282,14 +282,13 @@ async fn fetch_rss(info: &SiteInfo) -> Vec<String> {
     feed_urls
 }
 
-/// Fetch and parse a sitemap file
+/// Fetch, parse and cache a sitemap file
 #[async_recursion]
 async fn cache_sitemap(
     limiter: Arc<RateLimit>,
     sitemap_url: &Url,
-    builder: &mut Builder<GzEncoder<std::fs::File>>
+    builder: &mut Builder<GzEncoder<std::fs::File>>,
 ) {
-    
     let response = get_sitemap(sitemap_url, &limiter).await;
     match response {
         Ok(resp) => {
@@ -311,17 +310,19 @@ async fn cache_sitemap(
                 let mut header = Header::new_gnu();
                 header.set_size(buf.as_bytes().len().try_into().unwrap());
                 header.set_cksum();
-                if let Err(error) = builder.append_data(&mut header, sitemap_url.path().strip_prefix('/').unwrap(), buf.as_bytes()) {
+                if let Err(error) = builder.append_data(
+                    &mut header,
+                    sitemap_url.path().strip_prefix('/').unwrap(),
+                    buf.as_bytes(),
+                ) {
                     log::error!("Error {:?}", error);
                 }
-              
+
                 let parser = SiteMapReader::new(buf.as_bytes());
                 let mut sitemaps = Vec::new();
                 for entity in parser {
                     match entity {
-                        SiteMapEntity::Url(_url_entry) => {
-                           
-                        }
+                        SiteMapEntity::Url(_url_entry) => {}
                         SiteMapEntity::SiteMap(sitemap_entry) => {
                             if let Some(loc) = sitemap_entry.loc.get_url() {
                                 sitemaps.push(loc.to_string());
@@ -334,7 +335,6 @@ async fn cache_sitemap(
                 if !sitemaps.is_empty() {
                     log::info!("spawning {} tasks for sitemap fetching", sitemaps.len());
                     for sitemap in sitemaps {
-                       
                         let limiter = limiter.clone();
                         if let Ok(url) = Url::parse(&sitemap) {
                             cache_sitemap(limiter.clone(), &url, builder).await;
@@ -347,8 +347,6 @@ async fn cache_sitemap(
         }
         Err(err) => log::error!("{:?}", err),
     }
-
-   
 }
 
 /// Fetch and parse a sitemap file
@@ -486,35 +484,24 @@ fn get_cached_sitemap(sitemap_url: &Url) -> Option<String> {
     if let Some(domain) = sitemap_url.domain() {
         let site_cache = get_cache_location(domain);
         if site_cache.exists() {
-            let tar_gz =
-            std::fs::File::open(site_cache).unwrap();
+            let tar_gz = std::fs::File::open(site_cache).unwrap();
             let tar = GzDecoder::new(tar_gz);
             let mut archive = Archive::new(tar);
             let site_path = sitemap_url.path().strip_prefix('/').unwrap();
             if let Ok(entries) = archive.entries() {
                 for mut entry in entries.flatten() {
                     if let Ok(path) = entry.path() {
-                        log::debug!("Checking {:?} against {:?}", path, site_path);
                         if path.display().to_string().eq(site_path) {
                             let mut buf = String::new();
-                            entry.read_to_string(&mut buf);
-                            return Some(buf);
+                            match entry.read_to_string(&mut buf) {
+                                Ok(_) => return Some(buf),
+                                Err(err) => log::warn!("Error reading cache file {:?}", err),
+                            }
                         }
                     }
                 }
             }
         }
-       
-        // if site_cache.exists() {
-        //     match std::fs::read_to_string(site_cache) {
-        //         Ok(sitemap) => {
-        //             return Some(sitemap);
-        //         }
-        //         Err(error) => {
-        //             log::warn!("Error reading cached sitemap {:?}", error);
-        //         }
-        //     }
-        // }
     }
     None
 }
@@ -522,9 +509,8 @@ fn get_cached_sitemap(sitemap_url: &Url) -> Option<String> {
 // Accessor for the cache path based on the url and domain
 fn get_cache_location(domain: &str) -> PathBuf {
     let site_cache_path = Path::new(SITE_CACHE_DIR);
-    std::fs::create_dir_all(site_cache_path);
+    let _ = std::fs::create_dir_all(site_cache_path);
     site_cache_path.join(format!("{domain}.tar.gz"))
-    
 }
 
 #[cfg(test)]

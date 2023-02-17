@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use libnetrunner::archive::{create_archives, ArchiveRecord};
-use libnetrunner::{CrawlOpts, bootstrap};
+use libnetrunner::CrawlOpts;
 use ron::ser::PrettyConfig;
 use spyglass_lens::LensConfig;
 use tracing_log::LogTracer;
@@ -40,7 +40,9 @@ struct Cli {
 enum Commands {
     /// Print out useful information about a domain, such as whether there is an
     /// rss feed, an robots.txt, and a sitemap
-    CheckDomain { domain: String },
+    CheckDomain {
+        domain: String,
+    },
     /// Grabs all the URLs represented by <lens-file> for review.
     CheckUrls,
     /// Removes temporary directories/files
@@ -54,12 +56,18 @@ enum Commands {
         folder: PathBuf,
     },
     /// Parse a single HTML file, returning the expected result
-    Parse { html_file: PathBuf },
+    Parse {
+        html_file: PathBuf,
+    },
     /// Generate a preprocessed archive file from an archive.warc.gz file.
-    Preprocess { warc: PathBuf },
+    Preprocess {
+        warc: PathBuf,
+    },
     /// Validate the lens file and, if available, the cached web archive for <lens-file>
     Validate,
-    CacheSiteMaps { domain: String }
+    CacheSiteMaps {
+        domain: String,
+    },
 }
 
 fn main() -> Result<(), anyhow::Error> {
