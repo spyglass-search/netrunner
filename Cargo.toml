@@ -36,6 +36,7 @@ rusoto_s3 = "0.48.0"
 serde = { version = "1.0", features = ["derive"] }
 sitemap = "0.4.1"
 spyglass-lens = "0.1.5"
+tar = "0.4.38"
 tendril = "0.4.2"
 texting_robots = "0.2.1"
 thiserror = "1.0"

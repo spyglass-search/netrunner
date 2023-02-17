@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use libnetrunner::archive::{create_archives, ArchiveRecord};
-use libnetrunner::CrawlOpts;
+use libnetrunner::{CrawlOpts, bootstrap};
 use ron::ser::PrettyConfig;
 use spyglass_lens::LensConfig;
 use tracing_log::LogTracer;
@@ -59,6 +59,7 @@ enum Commands {
     Preprocess { warc: PathBuf },
     /// Validate the lens file and, if available, the cached web archive for <lens-file>
     Validate,
+    CacheSiteMaps { domain: String }
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -220,6 +221,13 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
         Commands::Validate => {
             let lens = _parse_lens(cli).await?;
             validate_lens(&lens)
+        }
+        Commands::CacheSiteMaps { domain } => {
+            let mut bootstrapper = Bootstrapper::default();
+            if let Err(error) = bootstrapper.cache_sitemaps(domain).await {
+                log::error!("Error caching sitemaps {:?}", error)
+            }
+            Ok(())
         }
     }
 }
