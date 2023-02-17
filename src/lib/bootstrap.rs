@@ -57,7 +57,7 @@ impl Bootstrapper {
     }
 
     /// Generates a sitemap cache for the specified domain
-    pub async fn cache_sitemaps(&mut self, domain: &str) -> anyhow::Result<()> {
+    pub async fn cache_sitemaps(&mut self, domain: &str) -> anyhow::Result<PathBuf> {
         let mut cache = CrawlCache::new();
         let domain_url = format!("http://{domain}/");
         if !cache.process_url(&domain_url).await {
@@ -65,7 +65,7 @@ impl Bootstrapper {
         }
 
         let site_cache = get_cache_location(domain);
-        let tar_gz = std::fs::File::create(site_cache).unwrap();
+        let tar_gz = std::fs::File::create(site_cache.clone()).unwrap();
 
         let tar = GzEncoder::new(tar_gz, Compression::default());
         let mut builder = Builder::new(tar);
@@ -74,7 +74,7 @@ impl Bootstrapper {
         if let Err(error) = builder.finish() {
             log::error!("Error closing archive {:?}", error);
         }
-        Ok(())
+        Ok(site_cache)
     }
 
     pub async fn find_urls(&mut self, lens: &LensConfig) -> anyhow::Result<Vec<String>> {
