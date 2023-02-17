@@ -482,7 +482,27 @@ async fn get_sitemap(sitemap_url: &Url, limiter: &Arc<RateLimit>) -> Result<Resp
 // Accessor for a sitemap cached to disk
 fn get_cached_sitemap(sitemap_url: &Url) -> Option<String> {
     if let Some(domain) = sitemap_url.domain() {
-        let site_cache = get_cache_location(domain);
+        let site_cache = get_cache_location(domain, sitemap_url);
+        log::debug!("Checking if cache exists {:?}", site_cache);
+        if site_cache.exists() {
+            match std::fs::read_to_string(site_cache) {
+                Ok(val) => {
+                    return Some(val);
+                }
+                Err(error) => {
+                    log::error!("Error processing file {:?}", error);
+                    return None;
+                }
+            }
+        }
+    }
+    None
+}
+
+// Accessor for a sitemap cached to disk
+fn get_cached_sitemap_from_archive(sitemap_url: &Url) -> Option<String> {
+    if let Some(domain) = sitemap_url.domain() {
+        let site_cache = get_cache_location_archive(domain);
         log::debug!("Checking if cache exists {:?}", site_cache);
         if site_cache.exists() {
             let tar_gz = std::fs::File::open(site_cache).unwrap();
@@ -512,7 +532,15 @@ fn get_cached_sitemap(sitemap_url: &Url) -> Option<String> {
 }
 
 // Accessor for the cache path based on the url and domain
-fn get_cache_location(domain: &str) -> PathBuf {
+fn get_cache_location(domain: &str, sitemap_url: &Url) -> PathBuf {
+    let site_cache_path = Path::new(SITE_CACHE_DIR);
+    let _ = std::fs::create_dir_all(site_cache_path);
+    let domain_folder = site_cache_path.join(domain);
+    domain_folder.join(sitemap_url.path().strip_prefix('/').unwrap())
+}
+
+// Accessor for the cache path based on the url and domain
+fn get_cache_location_archive(domain: &str) -> PathBuf {
     let site_cache_path = Path::new(SITE_CACHE_DIR);
     let _ = std::fs::create_dir_all(site_cache_path);
     site_cache_path.join(format!("{domain}.tar.gz"))
