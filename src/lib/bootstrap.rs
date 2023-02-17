@@ -299,21 +299,24 @@ async fn process_site_map(limiter: &Arc<RateLimit>, sitemap: String, allowed: &R
 
     if !sitemaps.is_empty() {
         log::info!("spawning {} tasks for sitemap fetching", sitemaps.len());
-        let mut set = JoinSet::new();
+        
         for sitemap in sitemaps {
             let allowed = allowed.clone();
             let skipped = skipped.clone();
             let limiter = limiter.clone();
             if let Ok(url) = Url::parse(&sitemap) {
-                set.spawn(async move {
-                    fetch_sitemap(limiter.clone(), &url, &allowed, &skipped).await
-                });
+                
+                let new_urls = fetch_sitemap(limiter.clone(), &url, &allowed, &skipped).await;
+                if !new_urls.is_empty() {
+                    urls.extend(new_urls);
+                }
+                
             }
         }
 
-        while let Some(Ok(found)) = set.join_next().await {
-            urls.extend(found);
-        }
+        // while let Some(Ok(found)) = set.join_next().await {
+        //     urls.extend(found);
+        // }
     }
 }
 
