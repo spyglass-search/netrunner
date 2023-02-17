@@ -8,6 +8,7 @@ use governor::RateLimiter;
 use nonzero_ext::nonzero;
 use regex::{RegexSet, RegexSetBuilder};
 use reqwest::Client;
+use reqwest::Error;
 use reqwest::Response;
 use rss::Channel;
 use sitemap::reader::{SiteMapEntity, SiteMapReader};
@@ -21,7 +22,6 @@ use tokio::task::JoinSet;
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::RetryIf;
 use url::Url;
-use reqwest::Error;
 
 use super::cdx;
 use super::crawler::RateLimit;
@@ -230,12 +230,11 @@ async fn fetch_sitemap(
     allowed: &RegexSet,
     skipped: &RegexSet,
 ) -> HashSet<String> {
-
     let mut urls: HashSet<String> = HashSet::new();
     match get_cached_sitemap(sitemap_url) {
         Some(sitemap_str) => {
             process_site_map(&limiter, sitemap_str, allowed, skipped, &mut urls).await;
-        },
+        }
         None => {
             let response = get_sitemap(sitemap_url, &limiter).await;
             match response {
@@ -253,7 +252,7 @@ async fn fetch_sitemap(
                         } else if let Ok(text) = resp.text().await {
                             buf = text.replace('\u{feff}', "");
                         }
-        
+
                         cache_sitemap(sitemap_url, &buf);
                         process_site_map(&limiter, buf, allowed, skipped, &mut urls).await;
                     } else {
@@ -273,9 +272,13 @@ async fn fetch_sitemap(
 }
 
 // Helper method used to process a sitemap
-async fn process_site_map(limiter: &Arc<RateLimit>, sitemap: String, allowed: &RegexSet,
-    skipped: &RegexSet, urls: &mut HashSet<String>) {
-
+async fn process_site_map(
+    limiter: &Arc<RateLimit>,
+    sitemap: String,
+    allowed: &RegexSet,
+    skipped: &RegexSet,
+    urls: &mut HashSet<String>,
+) {
     let parser = SiteMapReader::new(sitemap.as_bytes());
     let mut sitemaps = Vec::new();
     for entity in parser {
@@ -299,28 +302,23 @@ async fn process_site_map(limiter: &Arc<RateLimit>, sitemap: String, allowed: &R
 
     if !sitemaps.is_empty() {
         log::info!("spawning {} tasks for sitemap fetching", sitemaps.len());
-        
         for sitemap_chunk in sitemaps.chunks(10) {
-
             let mut set = JoinSet::new();
             for sitemap in sitemap_chunk {
                 let allowed = allowed.clone();
                 let skipped = skipped.clone();
                 let limiter = limiter.clone();
-                if let Ok(url) = Url::parse(&sitemap) {
+                if let Ok(url) = Url::parse(sitemap) {
                     set.spawn(async move {
                         fetch_sitemap(limiter.clone(), &url, &allowed, &skipped).await
                     });
                 }
             }
 
-            
             while let Some(Ok(found)) = set.join_next().await {
                 urls.extend(found);
             }
-            
         }
-
     }
 }
 
@@ -335,7 +333,6 @@ async fn get_sitemap(sitemap_url: &Url, limiter: &Arc<RateLimit>) -> Result<Resp
     RetryIf::spawn(
         retry_strat,
         || async {
-
             let domain = sitemap_url.domain().expect("No domain in URL");
             limiter.until_key_ready(&domain.to_string()).await;
             let response = client.get(sitemap_url.to_string()).send().await;
@@ -357,11 +354,10 @@ async fn get_sitemap(sitemap_url: &Url, limiter: &Arc<RateLimit>) -> Result<Resp
 
 // Caches the retrieved sitemap to disk
 fn cache_sitemap(sitemap_url: &Url, content: &str) {
-    
     if let Some(domain) = sitemap_url.domain() {
-        let site_cache = get_cache_location(sitemap_url, &domain);
+        let site_cache = get_cache_location(sitemap_url, domain);
         if let Some(parent) = site_cache.parent() {
-            if let Err(error) = std::fs::create_dir_all(parent) {
+            if let Err(_error) = std::fs::create_dir_all(parent) {
                 log::error!("Error creating directory {:?}", parent);
             }
         }
@@ -374,12 +370,12 @@ fn cache_sitemap(sitemap_url: &Url, content: &str) {
 // Accessor for a sitemap cached to disk
 fn get_cached_sitemap(sitemap_url: &Url) -> Option<String> {
     if let Some(domain) = sitemap_url.domain() {
-        let site_cache = get_cache_location(sitemap_url, &domain);
+        let site_cache = get_cache_location(sitemap_url, domain);
         if site_cache.exists() {
             match std::fs::read_to_string(site_cache) {
                 Ok(sitemap) => {
                     return Some(sitemap);
-                },
+                }
                 Err(error) => {
                     log::warn!("Error reading cached sitemap {:?}", error);
                 }
@@ -393,7 +389,7 @@ fn get_cached_sitemap(sitemap_url: &Url) -> Option<String> {
 fn get_cache_location(sitemap_url: &Url, domain: &str) -> PathBuf {
     let site_cache_path = Path::new(SITE_CACHE_DIR);
     let domain_cache = site_cache_path.join(domain);
-    domain_cache.join(sitemap_url.path().strip_prefix("/").unwrap())
+    domain_cache.join(sitemap_url.path().strip_prefix('/').unwrap())
 }
 
 #[cfg(test)]
