@@ -486,15 +486,18 @@ fn get_cached_sitemap(sitemap_url: &Url) -> Option<String> {
         let site_cache = get_cache_location(domain, sitemap_url);
         log::debug!("Checking if cache exists {:?}", site_cache);
         if site_cache.exists() {
-            match std::fs::read_to_string(site_cache) {
-                Ok(val) => {
-                    return Some(val);
+            match std::fs::File::open(site_cache) {
+                Ok(mut file) => {
+                    let mut buf = String::new();
+                    if let Ok(_) = file.read_to_string(&mut buf) {
+                        return Some(buf);
+                    }
                 }
                 Err(error) => {
-                    log::error!("Error processing file {:?}", error);
-                    return None;
+                    log::error!("Error opening file {:?}", error);
                 }
             }
+           
         }
     }
     None
