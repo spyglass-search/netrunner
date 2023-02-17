@@ -359,7 +359,7 @@ fn cache_sitemap(sitemap_url: &Url, content: &str) {
             }
         }
         if let Err(error) = std::fs::write(site_cache, content) {
-            log::error!("Error writing cached sitemap {:?}", site_cache);
+            log::error!("Error writing cached sitemap {:?}", error);
         }
     }
 }
