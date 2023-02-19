@@ -136,7 +136,7 @@ async fn fetch_page(
 
                 Err(FetchError::TooManyRequests)
             } else if let Err(err) = resp.error_for_status_ref() {
-                log::error!("Unable to fetch [{:?}] {} - {}", err.status(), url, err);
+                log::warn!("Unable to fetch [{:?}] {} - {}", err.status(), url, err);
                 Err(FetchError::HttpError(err))
             } else {
                 match ArchiveRecord::from_response(resp, url_override).await {
@@ -161,7 +161,7 @@ async fn fetch_page(
             }
         }
         Err(err) => {
-            log::error!("Unable to fetch [{:?}] {} - {}", err.status(), url, err);
+            log::warn!("Unable to fetch [{:?}] {} - {}", err.status(), url, err);
             Err(FetchError::RequestError(err))
         }
     }

@@ -102,7 +102,7 @@ impl Netrunner {
         match self.bootstrapper.find_urls(&self.lens).await {
             Ok(urls) => urls,
             Err(err) => {
-                log::error!("Unable to get_urls: {err}");
+                log::warn!("Unable to get_urls: {err}");
                 Vec::new()
             }
         }
@@ -231,7 +231,7 @@ impl Netrunner {
             if let Err(err) =
                 handle_crawl(&self.client, Some(tmp_storage.clone()), lim.clone(), &url).await
             {
-                log::error!("Unable to crawl {} - {err}", &url);
+                log::warn!("Unable to crawl {} - {err}", &url);
             }
 
             let progress = progress.clone();

@@ -23,7 +23,7 @@ pub fn validate_lens(lens: &LensConfig) -> Result<()> {
                     Ok(url) => Some(url),
                     Err(err) => {
                         failed_validation = true;
-                        log::error!("Invalid URL in `urls.txt`: <{}> - {}", x, err);
+                        log::warn!("Invalid URL in `urls.txt`: <{}> - {}", x, err);
                         None
                     }
                 })
@@ -39,7 +39,7 @@ pub fn validate_lens(lens: &LensConfig) -> Result<()> {
                         found_urls.insert(url);
                     }
                     Err(err) => {
-                        log::error!("Invalid URL in archive: <{}> - {}", rec.url, err);
+                        log::warn!("Invalid URL in archive: <{}> - {}", rec.url, err);
                         failed_validation = true;
                         continue;
                     }
@@ -67,8 +67,8 @@ pub fn validate_lens(lens: &LensConfig) -> Result<()> {
             let missing_urls: Vec<Url> = expected_urls.difference(&found_urls).cloned().collect();
 
             if !missing_urls.is_empty() {
-                log::error!("{} missing urls", missing_urls.len());
-                log::error!("{:?}", missing_urls);
+                log::warn!("{} missing urls", missing_urls.len());
+                log::debug!("{:?}", missing_urls);
                 failed_validation = true;
             }
 
