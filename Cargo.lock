@@ -2106,7 +2106,7 @@ dependencies = [
 
 [[package]]
 name = "spyglass-netrunner"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "anyhow",
  "async-recursion",
@@ -2131,6 +2131,7 @@ dependencies = [
  "rusoto_core",
  "rusoto_s3",
  "serde",
+ "serde_json",
  "sitemap",
  "spyglass-lens",
  "tendril",

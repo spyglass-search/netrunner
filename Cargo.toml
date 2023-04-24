@@ -1,6 +1,6 @@
 [package]
 name = "spyglass-netrunner"
-version ="0.2.10"
+version ="0.2.11"
 authors = ["Andrew Huynh <andrew@spyglass.fyi>"]
 description = "A small CLI utility to help build lenses for spyglass"
 edition = "2021"
@@ -34,6 +34,7 @@ rss = "2.0.1"
 rusoto_core = "0.48.0"
 rusoto_s3 = "0.48.0"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 sitemap = "0.4.1"
 spyglass-lens = "0.1.6"
 tendril = "0.4.2"

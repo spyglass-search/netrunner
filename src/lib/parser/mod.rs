@@ -34,15 +34,29 @@ impl ParseResult {
     }
 
     pub fn iter_from_gz(file: &Path) -> anyhow::Result<ParseResultGzIterator> {
+        let file_name = file.file_name().map(|f| f.to_string_lossy()).unwrap_or_default();
+        let file_format = if file_name.contains(".jsonl.gz") {
+            ParseResultFormat::Json
+        } else {
+            ParseResultFormat::Ron
+        };
+
         let file = File::open(file)?;
-        Ok(ParseResultGzIterator::new(BufReader::new(GzDecoder::new(
+        Ok(ParseResultGzIterator::new(file_format, BufReader::new(GzDecoder::new(
             file,
         ))))
     }
 }
 
+#[derive(Debug)]
+pub enum ParseResultFormat {
+    Json,
+    Ron
+}
+
 type GzBufReader = BufReader<GzDecoder<File>>;
 pub struct ParseResultGzIterator {
+    file_format: ParseResultFormat,
     reader: GzBufReader,
     buffer: String,
 }
@@ -50,8 +64,9 @@ pub struct ParseResultGzIterator {
 /// Utility iterator that reads in lines from a gzipped archive of serialized
 /// ParseResults
 impl ParseResultGzIterator {
-    pub fn new(reader: GzBufReader) -> Self {
+    pub fn new(file_format: ParseResultFormat, reader: GzBufReader) -> Self {
         Self {
+            file_format,
             reader,
             buffer: String::new(),
         }
@@ -67,14 +82,21 @@ impl Iterator for ParseResultGzIterator {
                 return None;
             }
 
-            if let Ok(res) = ron::de::from_str::<ParseResult>(&self.buffer) {
-                Some(res)
-            } else {
-                None
+            match self.file_format {
+                ParseResultFormat::Json => {
+                    if let Ok(res) = serde_json::de::from_str::<ParseResult>(&self.buffer) {
+                        return Some(res);
+                    }
+                },
+                ParseResultFormat::Ron => {
+                    if let Ok(res) = ron::de::from_str::<ParseResult>(&self.buffer) {
+                        return Some(res);
+                    }
+                }
             }
-        } else {
-            None
         }
+
+        None
     }
 }
 
@@ -133,5 +155,27 @@ impl ParseResultBuilder {
     pub fn title(mut self, title: Option<String>) -> Self {
         self.result.title = title;
         self
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::Path;
+    use super::ParseResult;
+
+    #[test]
+    pub fn test_ron_archive() {
+        let path = Path::new("fixtures/archives/ron.gz");
+        let res = ParseResult::iter_from_gz(&path).unwrap();
+        let results = res.into_iter().collect::<Vec<_>>();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    pub fn test_json_archive() {
+        let path = Path::new("fixtures/archives/json.jsonl.gz");
+        let res = ParseResult::iter_from_gz(&path).unwrap();
+        let results = res.into_iter().collect::<Vec<_>>();
+        assert_eq!(results.len(), 1);
     }
 }
