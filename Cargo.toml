@@ -16,7 +16,7 @@ async-recursion = "1.0.0"
 blake2 = "0.10.4"
 bytes = "1.2"
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.2", features = ["derive"] }
 dashmap = "5.4"
 ego-tree = "0.6.2"
 feedfinder = "0.4.0"
