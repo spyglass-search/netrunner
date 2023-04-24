@@ -213,7 +213,6 @@ pub fn html_to_text(url: &str, doc: &str) -> ParseResult {
             // Still nothing? Grab the first 256 words-ish
             description = content
                 .split(' ')
-                .into_iter()
                 .take(DEFAULT_DESC_LENGTH)
                 .collect::<Vec<&str>>()
                 .join(" ")

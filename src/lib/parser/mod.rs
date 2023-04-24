@@ -34,7 +34,10 @@ impl ParseResult {
     }
 
     pub fn iter_from_gz(file: &Path) -> anyhow::Result<ParseResultGzIterator> {
-        let file_name = file.file_name().map(|f| f.to_string_lossy()).unwrap_or_default();
+        let file_name = file
+            .file_name()
+            .map(|f| f.to_string_lossy())
+            .unwrap_or_default();
         let file_format = if file_name.contains(".jsonl.gz") {
             ParseResultFormat::Json
         } else {
@@ -42,16 +45,17 @@ impl ParseResult {
         };
 
         let file = File::open(file)?;
-        Ok(ParseResultGzIterator::new(file_format, BufReader::new(GzDecoder::new(
-            file,
-        ))))
+        Ok(ParseResultGzIterator::new(
+            file_format,
+            BufReader::new(GzDecoder::new(file)),
+        ))
     }
 }
 
 #[derive(Debug)]
 pub enum ParseResultFormat {
     Json,
-    Ron
+    Ron,
 }
 
 type GzBufReader = BufReader<GzDecoder<File>>;
@@ -87,7 +91,7 @@ impl Iterator for ParseResultGzIterator {
                     if let Ok(res) = serde_json::de::from_str::<ParseResult>(&self.buffer) {
                         return Some(res);
                     }
-                },
+                }
                 ParseResultFormat::Ron => {
                     if let Ok(res) = ron::de::from_str::<ParseResult>(&self.buffer) {
                         return Some(res);
@@ -160,8 +164,8 @@ impl ParseResultBuilder {
 
 #[cfg(test)]
 mod test {
-    use std::path::Path;
     use super::ParseResult;
+    use std::path::Path;
 
     #[test]
     pub fn test_ron_archive() {
