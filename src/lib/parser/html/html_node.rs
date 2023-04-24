@@ -82,7 +82,7 @@ impl Html {
                 let node = child.value();
                 if let Some(element) = node.as_element() {
                     if element.name() == "title" {
-                        let title = child.children().into_iter().next();
+                        let title = child.children().next();
                         return title
                             .and_then(|val| val.value().as_text())
                             .map(|text| text.trim().to_string());
