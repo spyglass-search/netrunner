@@ -1,13 +1,15 @@
 use clap::{Parser, Subcommand};
 use libnetrunner::archive::{create_archives, ArchiveRecord};
 use libnetrunner::CrawlOpts;
+use libnetrunner::parser::ParseResult;
 use ron::ser::PrettyConfig;
 use spyglass_lens::LensConfig;
 use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 use walkdir::WalkDir;
 
-use std::io;
+use std::fs::File;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use tokio::runtime;
 
@@ -43,6 +45,8 @@ enum Commands {
     CheckDomain { domain: String },
     /// Grabs all the URLs represented by <lens-file> for review.
     CheckUrls,
+    /// Converts a parsed.gz file into the JSON equivalent (usable outside of Spyglass).
+    ConvertToJson { parsed_file: PathBuf, out_file: PathBuf },
     /// Removes temporary directories/files
     Clean,
     /// Crawls & creates a web archive for the pages represented by <lens-file>
@@ -129,6 +133,20 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
             let tmp = Path::new("tmp");
             if tmp.exists() {
                 std::fs::remove_dir_all("tmp")?;
+            }
+
+            Ok(())
+        }
+        Commands::ConvertToJson { parsed_file, out_file } => {
+            log::info!("converting {:?}", parsed_file);
+            let mut out_file = File::create(out_file).expect("Unable to write to file");
+            if let Ok(results) = ParseResult::iter_from_gz(&parsed_file) {
+                for result in results.into_iter() {
+                    let serialized = serde_json::to_string(&result).expect("Unable to serialize row");
+                    out_file
+                        .write_fmt(format_args!("{}\n", serialized))
+                        .expect("Unable to write to file");
+                }
             }
 
             Ok(())
