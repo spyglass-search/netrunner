@@ -31,7 +31,7 @@ static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"
 #[derive(Default)]
 pub struct CrawlConfig {
     // Crawl website first and fallback to IA
-    og_first: bool,
+    pub og_first: bool,
 }
 
 pub struct CrawlOpts {
