@@ -28,6 +28,12 @@ use archive::{create_archives, ArchiveFiles, ArchiveRecord};
 
 static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"));
 
+#[derive(Default)]
+pub struct CrawlConfig {
+    // Crawl website first and fallback to IA
+    og_first: bool,
+}
+
 pub struct CrawlOpts {
     pub create_warc: bool,
     pub requests_per_second: u32,
@@ -124,7 +130,7 @@ impl Netrunner {
             // Default to max 2 requests per second for a domain.
             let quota = Quota::per_second(nonzero!(2u32));
             let tmp_storage = tmp_storage_path(&self.lens);
-            self.crawl_loop(&crawl_queue, &tmp_storage, quota).await?;
+            self.crawl_loop(&crawl_queue, &tmp_storage, quota, &CrawlConfig::default()).await?;
             let archives =
                 create_archives(&self.storage, &self.cached_records(&tmp_storage)).await?;
             return Ok(Some(archives));
@@ -136,10 +142,12 @@ impl Netrunner {
     pub async fn crawl_url(
         &mut self,
         url: String,
+        crawl_config: &CrawlConfig,
     ) -> Result<Vec<(ArchiveRecord, Option<ParseResult>)>> {
         let quota = Quota::per_second(nonzero!(2u32));
         let tmp_storage = tmp_storage_path(&self.lens);
-        self.crawl_loop(&[url], &tmp_storage, quota).await?;
+        self.crawl_loop(&[url], &tmp_storage, quota, crawl_config)
+            .await?;
         let archived = self.cached_records(&tmp_storage);
 
         let mut records = Vec::new();
@@ -202,6 +210,7 @@ impl Netrunner {
         crawl_queue: &[String],
         tmp_storage: &PathBuf,
         quota: Quota,
+        crawl_config: &CrawlConfig,
     ) -> anyhow::Result<()> {
         let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
         let progress = Arc::new(AtomicUsize::new(0));
@@ -228,8 +237,14 @@ impl Netrunner {
                 continue;
             }
 
-            if let Err(err) =
-                handle_crawl(&self.client, Some(tmp_storage.clone()), lim.clone(), &url).await
+            if let Err(err) = handle_crawl(
+                &self.client,
+                Some(tmp_storage.clone()),
+                lim.clone(),
+                &url,
+                crawl_config,
+            )
+            .await
             {
                 log::warn!("Unable to crawl {} - {err}", &url);
             }

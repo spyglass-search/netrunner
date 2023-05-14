@@ -13,6 +13,7 @@ use tokio_retry::RetryIf;
 
 use crate::archive::ArchiveRecord;
 use crate::cdx::create_archive_url;
+use crate::CrawlConfig;
 
 static APP_USER_AGENT: &str = concat!("netrunner", "/", env!("CARGO_PKG_VERSION"));
 const RETRY_DELAY_MS: u64 = 5000;
@@ -63,49 +64,46 @@ pub async fn handle_crawl(
     tmp_storage: Option<PathBuf>,
     lim: Arc<RateLimit>,
     url: &url::Url,
+    crawl_config: &CrawlConfig,
 ) -> anyhow::Result<ArchiveRecord, FetchError> {
     // URL to Wayback Machine
     let ia_url = create_archive_url(url.as_ref());
-
     let domain = url.domain().expect("No domain in URL");
 
     let retry_strat = ExponentialBackoff::from_millis(100)
         .max_delay(Duration::from_secs(5))
         .take(3);
 
-    // Retry if we run into 429 / timeout errors
-    let web_archive = RetryIf::spawn(
-        retry_strat.clone(),
-        || async {
-            log::info!("trying to fetch from IA");
-            // Wait for when we can crawl this based on the domain
-            lim.until_key_ready(&domain.to_string()).await;
-            fetch_page(client, &ia_url, Some(url.to_string()), tmp_storage.clone()).await
-        },
-        should_retry,
-    )
-    .await;
+    let crawl_og = || async {
+        log::info!("trying to fetch from origin");
+        // Wait for when we can crawl this based on the domain
+        lim.until_key_ready(&domain.to_string()).await;
+        fetch_page(client, url.as_ref(), None, tmp_storage.clone()).await
+    };
 
-    // If we fail trying to get the page from the web archive, hit the
-    // site directly.
-    if web_archive.is_err() {
-        let retry_strat = ExponentialBackoff::from_millis(100)
-            .max_delay(Duration::from_secs(5))
-            .take(3);
+    let crawl_ia = || async {
+        log::info!("trying to fetch from IA");
+        // Wait for when we can crawl this based on the domain
+        lim.until_key_ready(&domain.to_string()).await;
+        fetch_page(client, &ia_url, Some(url.to_string()), tmp_storage.clone()).await
+    };
 
-        RetryIf::spawn(
-            retry_strat,
-            || async {
-                log::info!("trying to fetch from origin");
-                // Wait for when we can crawl this based on the domain
-                lim.until_key_ready(&domain.to_string()).await;
-                fetch_page(client, url.as_ref(), None, tmp_storage.clone()).await
-            },
-            should_retry,
-        )
-        .await
+    if crawl_config.og_first {
+        // Retry if we run into 429 / timeout errors
+        let attempt = RetryIf::spawn(retry_strat.clone(), crawl_og, should_retry).await;
+
+        match attempt {
+            Ok(attempt) => Ok(attempt),
+            Err(_) => RetryIf::spawn(retry_strat, crawl_ia, should_retry).await,
+        }
     } else {
-        Ok(web_archive.unwrap())
+        // Retry if we run into 429 / timeout errors
+        let attempt = RetryIf::spawn(retry_strat.clone(), crawl_ia, should_retry).await;
+
+        match attempt {
+            Ok(attempt) => Ok(attempt),
+            Err(_) => RetryIf::spawn(retry_strat, crawl_og, should_retry).await,
+        }
     }
 }
 
