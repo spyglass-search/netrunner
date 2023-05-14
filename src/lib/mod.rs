@@ -130,7 +130,8 @@ impl Netrunner {
             // Default to max 2 requests per second for a domain.
             let quota = Quota::per_second(nonzero!(2u32));
             let tmp_storage = tmp_storage_path(&self.lens);
-            self.crawl_loop(&crawl_queue, &tmp_storage, quota, &CrawlConfig::default()).await?;
+            self.crawl_loop(&crawl_queue, &tmp_storage, quota, &CrawlConfig::default())
+                .await?;
             let archives =
                 create_archives(&self.storage, &self.cached_records(&tmp_storage)).await?;
             return Ok(Some(archives));

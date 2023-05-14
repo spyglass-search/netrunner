@@ -201,6 +201,14 @@ mod test {
         )
         .expect("Invalid URL");
 
-        assert!(handle_crawl(&client, None, lim.clone(), &url).await.is_ok());
+        assert!(handle_crawl(
+            &client,
+            None,
+            lim.clone(),
+            &url,
+            &crate::CrawlConfig::default()
+        )
+        .await
+        .is_ok());
     }
 }
