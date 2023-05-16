@@ -2336,9 +2336,9 @@ dependencies = [
 
 [[package]]
 name = "texting_robots"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "828e9d94f6124477a527edec483720cb9ed71ae5dcbf9c1c46c27c76c2081c7c"
+checksum = "5b82a718a28dda2e67ad6e0464597b58eae39e2e4d0451e03d1028d71e81bb4a"
 dependencies = [
  "anyhow",
  "bstr",

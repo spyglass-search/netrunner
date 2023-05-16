@@ -130,11 +130,9 @@ impl Bootstrapper {
             // Fetch links from RSS feeds
             to_crawl.extend(fetch_rss(info).await);
             // Grab list of sitemaps
-            if let Some(robot) = &info.robot {
-                if !robot.sitemaps.is_empty() {
-                    for sitemap in &robot.sitemaps {
-                        sitemaps.push(sitemap.clone());
-                    }
+            if !info.sitemaps.is_empty() {
+                for sitemap in &info.sitemaps {
+                    sitemaps.push(sitemap.clone());
                 }
             }
         }
