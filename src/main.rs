@@ -7,7 +7,8 @@ use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 use walkdir::WalkDir;
 
-use std::io;
+use std::fs::File;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use tokio::runtime;
 
@@ -119,9 +120,18 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
             let mut sorted = to_crawl.iter().collect::<Vec<_>>();
             sorted.sort();
 
+            // Also output to urls.txt
+            let output_path: PathBuf = "urls.txt".into();
+            if output_path.exists() {
+                std::fs::remove_file(output_path).unwrap();
+            }
+
+            let mut output = File::create("urls.txt").unwrap();
             for url in sorted {
                 println!("{url}");
+                let _ = output.write_fmt(format_args!("{}\n", url));
             }
+
             Ok(())
         }
         Commands::Clean => {

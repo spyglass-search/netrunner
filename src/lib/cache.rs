@@ -35,7 +35,8 @@ impl CrawlCache {
                     self.cache.insert(base_url, Some(info));
                     return has_sitemap;
                 }
-                Err(_) => {
+                Err(err) => {
+                    log::error!("error grabbing site info: {err}");
                     self.cache.insert(base_url, None);
                 }
             }

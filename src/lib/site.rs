@@ -40,6 +40,20 @@ impl SiteInfo {
             }
         }
 
+        // Always try sitemap at root
+        if sitemaps.is_empty() {
+            let root_sitemap = format!("{domain_url}sitemap.xml");
+            let resp = reqwest::get(root_sitemap.clone())
+                .await
+                .is_ok();
+            if resp {
+                log::info!("Found root sitemap: {}", root_sitemap);
+                sitemaps.push(root_sitemap);
+            } else {
+                log::info!("no sitemaps found for {domain_url}");
+            }
+        }
+
         Ok(Self {
             domain: domain.to_owned(),
             feeds,

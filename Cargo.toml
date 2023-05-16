@@ -38,7 +38,7 @@ serde_json = "1.0"
 sitemap = "0.4.1"
 spyglass-lens = "0.1.6"
 tendril = "0.4.2"
-texting_robots = "0.2.1"
+texting_robots = "0.2.2"
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 tokio-retry = "0.3"
