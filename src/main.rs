@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use libnetrunner::archive::{create_archives, ArchiveRecord};
-use libnetrunner::CrawlOpts;
+use libnetrunner::{CrawlConfig, CrawlOpts};
 use ron::ser::PrettyConfig;
 use spyglass_lens::LensConfig;
 use tracing_log::LogTracer;
@@ -47,7 +47,7 @@ enum Commands {
     /// Removes temporary directories/files
     Clean,
     /// Crawls & creates a web archive for the pages represented by <lens-file>
-    Crawl,
+    Crawl { origin_first: Option<bool> },
     /// Crawls a folder (recursively) for web pages & creates a WARC & preprocessed archive
     CrawlFolder {
         base_url: String,
@@ -143,13 +143,16 @@ async fn _run_cmd(cli: &mut Cli) -> Result<(), anyhow::Error> {
 
             Ok(())
         }
-        Commands::Crawl => {
+        Commands::Crawl { origin_first } => {
             let lens = _parse_lens(cli).await?;
             let mut netrunner = Netrunner::new(lens.clone());
 
-            let archive_path = netrunner
+            let archive_path: Option<libnetrunner::archive::ArchiveFiles> = netrunner
                 .crawl(CrawlOpts {
                     create_warc: true,
+                    config: CrawlConfig {
+                        og_first: origin_first.unwrap_or_default(),
+                    },
                     ..Default::default()
                 })
                 .await?;

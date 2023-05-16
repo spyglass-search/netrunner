@@ -37,6 +37,7 @@ pub struct CrawlConfig {
 pub struct CrawlOpts {
     pub create_warc: bool,
     pub requests_per_second: u32,
+    pub config: CrawlConfig,
 }
 
 impl Default for CrawlOpts {
@@ -44,6 +45,7 @@ impl Default for CrawlOpts {
         Self {
             create_warc: false,
             requests_per_second: 2,
+            config: CrawlConfig::default(),
         }
     }
 }
@@ -130,7 +132,7 @@ impl Netrunner {
             // Default to max 2 requests per second for a domain.
             let quota = Quota::per_second(nonzero!(2u32));
             let tmp_storage = tmp_storage_path(&self.lens);
-            self.crawl_loop(&crawl_queue, &tmp_storage, quota, &CrawlConfig::default())
+            self.crawl_loop(&crawl_queue, &tmp_storage, quota, &opts.config)
                 .await?;
             let archives =
                 create_archives(&self.storage, &self.cached_records(&tmp_storage)).await?;
