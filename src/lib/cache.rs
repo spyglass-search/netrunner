@@ -65,8 +65,26 @@ pub async fn read_robots(robots_url: &str) -> Result<Option<Robot>> {
 
 #[cfg(test)]
 mod test {
-    use super::read_robots;
+    use super::{read_robots, CrawlCache};
     use texting_robots::get_robots_url;
+
+    #[ignore = "External Website Dependency"]
+    #[tokio::test]
+    async fn test_crawl_cache() {
+        let mut crawl_cache = CrawlCache::new();
+        assert_eq!(
+            crawl_cache
+                .process_url("https://questionablecontent.net/")
+                .await,
+            false
+        );
+        assert_eq!(
+            crawl_cache
+                .process_url("https://learn.microsoft.com/")
+                .await,
+            true
+        );
+    }
 
     #[tokio::test]
     async fn test_read_robots_domain() {

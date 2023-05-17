@@ -3,6 +3,7 @@ use feedfinder::{detect_feeds, Feed};
 use texting_robots::{get_robots_url, Robot};
 use url::Url;
 
+#[derive(Debug)]
 pub struct SiteInfo {
     pub domain: String,
     pub feeds: Vec<Feed>,
@@ -43,12 +44,18 @@ impl SiteInfo {
         // Always try sitemap at root
         if sitemaps.is_empty() {
             let root_sitemap = format!("{domain_url}sitemap.xml");
-            let resp = reqwest::get(root_sitemap.clone()).await.is_ok();
-            if resp {
-                log::info!("Found root sitemap: {}", root_sitemap);
-                sitemaps.push(root_sitemap);
-            } else {
-                log::info!("no sitemaps found for {domain_url}");
+            match reqwest::get(root_sitemap.clone()).await {
+                Ok(response) => {
+                    if response.error_for_status().is_ok() {
+                        log::info!("Found root sitemap: {}", root_sitemap);
+                        sitemaps.push(root_sitemap);
+                    } else {
+                        log::info!("no sitemaps found for {domain_url}");
+                    }
+                }
+                Err(_) => {
+                    log::info!("no sitemaps found for {domain_url}");
+                }
             }
         }
 
