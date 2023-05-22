@@ -122,8 +122,6 @@ impl Bootstrapper {
         allowed: &RegexSet,
         skipped: &RegexSet,
     ) {
-        // Crawl sitemaps & rss feeds
-        let mut handles = JoinSet::new();
         let mut sitemaps = Vec::new();
 
         for info in cache.cache.values().flatten() {
@@ -137,27 +135,16 @@ impl Bootstrapper {
             }
         }
 
-        if !sitemaps.is_empty() {
-            log::info!("spawning {} tasks for sitemap fetching", sitemaps.len());
-            let quota = Quota::per_second(nonzero!(2u32));
-            let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
+        process_sitemaps(&sitemaps, to_crawl, allowed, skipped).await;
+        self.process_cdx(to_crawl, allowed, skipped).await;
+    }
 
-            for sitemap in sitemaps {
-                let allowed = allowed.clone();
-                let skipped = skipped.clone();
-                let lim = lim.clone();
-                if let Ok(url) = Url::parse(&sitemap) {
-                    handles.spawn(async move {
-                        fetch_sitemap(lim.clone(), &url, &allowed, &skipped).await
-                    });
-                }
-            }
-
-            while let Some(Ok(urls)) = handles.join_next().await {
-                to_crawl.extend(urls);
-            }
-        }
-
+    async fn process_cdx(
+        &self,
+        to_crawl: &mut DashSet<String>,
+        allowed: &RegexSet,
+        skipped: &RegexSet,
+    ) {
         // Process any URLs in the cdx queue
         for prefix in self.cdx_queue.iter() {
             let mut resume_key = None;
@@ -185,6 +172,37 @@ impl Bootstrapper {
 
                 resume_key = resume;
             }
+        }
+    }
+}
+
+pub async fn process_sitemaps(
+    sitemaps: &Vec<String>,
+    to_crawl: &mut DashSet<String>,
+    allowed: &RegexSet,
+    skipped: &RegexSet,
+) {
+    // Crawl sitemaps & rss feeds
+    let mut handles = JoinSet::new();
+
+    if !sitemaps.is_empty() {
+        log::info!("spawning {} tasks for sitemap fetching", sitemaps.len());
+        let quota = Quota::per_second(nonzero!(2u32));
+        let lim = Arc::new(RateLimiter::<String, _, _>::keyed(quota));
+
+        for sitemap in sitemaps {
+            let allowed = allowed.clone();
+            let skipped = skipped.clone();
+            let lim = lim.clone();
+            if let Ok(url) = Url::parse(sitemap) {
+                handles.spawn(
+                    async move { fetch_sitemap(lim.clone(), &url, &allowed, &skipped).await },
+                );
+            }
+        }
+
+        while let Some(Ok(urls)) = handles.join_next().await {
+            to_crawl.extend(urls);
         }
     }
 }
