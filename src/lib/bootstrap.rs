@@ -207,7 +207,7 @@ pub async fn process_sitemaps(
     }
 }
 
-async fn fetch_rss(info: &SiteInfo) -> Vec<String> {
+pub async fn fetch_rss(info: &SiteInfo) -> Vec<String> {
     let mut feed_urls: Vec<String> = Vec::new();
 
     for feed in &info.feeds {
