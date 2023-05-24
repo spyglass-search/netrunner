@@ -98,6 +98,34 @@ impl Bootstrapper {
 
         // Clear CDX queue after fetching URLs.
         self.cdx_queue.clear();
+
+        // Check if the site map found entries for specified url
+        // if no entry was found then we should check the cdx
+        for prefix in lens.urls.iter() {
+            let url = if prefix.ends_with('$') {
+                continue;
+            } else {
+                prefix
+            };
+
+            let mut count = 0;
+            for crawl in to_crawl.iter() {
+                if crawl.starts_with(url) {
+                    count += 1;
+                }
+            }
+
+            if count <= 1 {
+                self.cdx_queue.insert(url.to_owned());
+            }
+        }
+
+        if !self.cdx_queue.is_empty() {
+            self.process_cdx(&mut to_crawl, &allowed, &skipped).await;
+        }
+
+        // Clear CDX queue after fetching URLs.
+        self.cdx_queue.clear();
         // Ignore invalid URLs and remove fragments from URLs (e.g. http://example.com#Title
         // is considered the same as http://example.com)
         let cleaned: HashSet<String> = to_crawl
