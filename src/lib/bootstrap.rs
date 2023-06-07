@@ -6,10 +6,14 @@ use flate2::read::GzDecoder;
 use governor::Quota;
 use governor::RateLimiter;
 use nonzero_ext::nonzero;
+use regex::Regex;
+use regex::RegexBuilder;
 use regex::{RegexSet, RegexSetBuilder};
 use reqwest::Client;
 use rss::Channel;
 use sitemap::reader::{SiteMapEntity, SiteMapReader};
+use spyglass_lens::types::LensRule;
+use spyglass_lens::types::UrlSanitizeConfig;
 use spyglass_lens::LensConfig;
 use std::sync::Arc;
 use std::time::Duration;
@@ -124,6 +128,19 @@ impl Bootstrapper {
             self.process_cdx(&mut to_crawl, &allowed, &skipped).await;
         }
 
+        let sanitize_rules = lens
+            .rules
+            .iter()
+            .filter_map(|rule| {
+                if let LensRule::SanitizeUrls(_, config) = rule {
+                    let regex = RegexBuilder::new(&rule.to_regex()).build().ok()?;
+                    Some((regex, config.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<(Regex, UrlSanitizeConfig)>>();
+
         // Clear CDX queue after fetching URLs.
         self.cdx_queue.clear();
         // Ignore invalid URLs and remove fragments from URLs (e.g. http://example.com#Title
@@ -133,6 +150,12 @@ impl Bootstrapper {
             .filter_map(|url| {
                 if let Ok(mut url) = Url::parse(&url) {
                     url.set_fragment(None);
+                    for (regex, config) in &sanitize_rules {
+                        if regex.is_match(url.as_str()) {
+                            sanitize_url(&mut url, config);
+                        }
+                    }
+
                     Some(url.to_string())
                 } else {
                     None
@@ -363,6 +386,14 @@ async fn fetch_sitemap(
     }
 
     urls
+}
+
+// Helper method used to process the url sanitization configuration for
+// the provided url
+fn sanitize_url(url: &mut Url, config: &UrlSanitizeConfig) {
+    if config.remove_query_parameter {
+        url.set_query(None);
+    }
 }
 
 #[cfg(test)]
